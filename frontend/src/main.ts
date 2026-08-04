@@ -37,7 +37,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   pickBtn.textContent = "Pick from notebook";
   pickBtn.addEventListener("click", () => {
     armPicker(model, (selection) => {
-      model.set("selection", selection);
+      const current = (model.get("selection") as Record<string, unknown>) ?? {};
+      model.set("selection", { ...current, artifact: selection });
       model.save_changes();
       renderBody();
     });

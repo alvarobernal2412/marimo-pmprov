@@ -21,7 +21,7 @@ function allAnnotationsNewestFirst(tree: ProvenanceTreeJson): { stateId: string;
 
 let model_commits: { stateId: string; annotation: AnnotationJson }[] = [];
 
-function renderCommitCard(row: { stateId: string; annotation: AnnotationJson }, mode: string): HTMLElement {
+function renderCommitCard(row: { stateId: string; annotation: AnnotationJson }, mode: string, model: AnyModel): HTMLElement {
   const card = document.createElement("div");
   card.className = "pw-commit-card";
   card.dataset.stateId = row.stateId;
@@ -39,6 +39,11 @@ function renderCommitCard(row: { stateId: string; annotation: AnnotationJson }, 
       const restoreBtn = document.createElement("button");
       restoreBtn.className = "pw-restore-btn";
       restoreBtn.textContent = `Restore to @${t.name}`;
+      restoreBtn.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+        model.set("restore_request", { tag: t.name });
+        model.save_changes();
+      });
       chip.appendChild(restoreBtn);
     }
     tags.appendChild(chip);
@@ -69,7 +74,7 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
   commitBtn.className = "pw-commit-btn";
   commitBtn.textContent = "Commit annotation";
   commitBtn.addEventListener("click", () => {
-    const selection = model.get("selection") as Record<string, unknown>;
+    const selection = (model.get("selection") as { artifact?: Record<string, unknown> })?.artifact ?? {};
     const newAnnotation: AnnotationJson = {
       annotationId: `ann-${Date.now()}`,
       title: noteField.value.slice(0, 40) || "Untitled annotation",
@@ -108,7 +113,7 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
 
   const rail = document.createElement("div");
   rail.className = "pw-commit-rail";
-  allAnnotationsNewestFirst(tree).forEach((row) => rail.appendChild(renderCommitCard(row, mode)));
+  allAnnotationsNewestFirst(tree).forEach((row) => rail.appendChild(renderCommitCard(row, mode, model)));
   container.appendChild(rail);
 
   if (mode === "student") {

@@ -19,8 +19,8 @@ function reproductionPath(tree: ProvenanceTreeJson, stateId: string): Provenance
 export function renderInspect(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
-  const selection = (model.get("selection") as { pickedStateId?: string }) ?? {};
-  const stateId = selection.pickedStateId ?? tree.rootId;
+  const selection = (model.get("selection") as { node?: { pickedStateId?: string } }) ?? {};
+  const stateId = selection.node?.pickedStateId ?? tree.rootId;
   const node = tree.nodes[stateId];
 
   const breadcrumb = document.createElement("div");

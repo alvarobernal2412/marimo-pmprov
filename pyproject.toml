@@ -11,7 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pmprov = ["pmprov @ git+https://github.com/<org>/pmprov.git@vX.Y.Z"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pandas"]
 
 [build-system]
 requires = ["hatchling"]

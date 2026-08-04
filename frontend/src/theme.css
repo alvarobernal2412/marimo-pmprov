@@ -40,6 +40,16 @@
   padding: 2px 8px;
   font-size: 11px;
 }
+.pw-restore-btn {
+  margin-left: 6px;
+  border: none;
+  background: #F59E0B;
+  color: white;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
 .pw-artifact-badge {
   border: 1px solid #94A3B8;
   border-radius: 6px;

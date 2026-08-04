@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import html
+
 import marimo as mo
 
 
 def _wrap(inner_html: str, artifact_id: str, artifact_name: str, granularity: str) -> mo.Html:
     return mo.Html(
         f'<div class="pw-annotatable" '
-        f'data-pw-artifact-id="{artifact_id}" '
-        f'data-pw-artifact-name="{artifact_name}" '
-        f'data-pw-granularity="{granularity}">'
+        f'data-pw-artifact-id="{html.escape(artifact_id, quote=True)}" '
+        f'data-pw-artifact-name="{html.escape(artifact_name, quote=True)}" '
+        f'data-pw-granularity="{html.escape(granularity, quote=True)}">'
         f"{inner_html}"
         f"</div>"
     )

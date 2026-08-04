@@ -38,7 +38,7 @@ class ProvenancePanel:
         return self.widget
 
     def commit_annotation(self, annotation_dict: dict) -> None:
-        self.widget.commits = [*self.widget.commits, annotation_dict]
+        self.widget.commits = [*self.widget.commits, {"stateId": "python", "annotation": annotation_dict}]
 
     def request_restore(self, tag: str) -> None:
         self.widget.restore_request = {"tag": tag}

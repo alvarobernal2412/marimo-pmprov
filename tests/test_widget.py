@@ -24,7 +24,8 @@ def test_commit_annotation_appends_to_commits_list():
     assert panel.widget.commits == []
     panel.commit_annotation({"title": "New note", "note": "...", "tags": [], "artifacts": []})
     assert len(panel.widget.commits) == 1
-    assert panel.widget.commits[0]["title"] == "New note"
+    assert panel.widget.commits[0]["annotation"]["title"] == "New note"
+    assert panel.widget.commits[0]["stateId"] == "python"
 
 
 def test_sidebar_and_tree_surface_return_the_same_widget_instance():

@@ -17,10 +17,15 @@ def _():
 
 
 @app.cell
-def _(MockProvenanceSource, ProvenancePanel, mo):
+def _(mo):
     mode_toggle = mo.ui.radio(options=["student", "reviewer"], value="student", label="Persona")
+    return (mode_toggle,)
+
+
+@app.cell
+def _(MockProvenanceSource, ProvenancePanel, mode_toggle):
     panel = ProvenancePanel(source=MockProvenanceSource(), mode=mode_toggle.value)
-    return mode_toggle, panel
+    return (panel,)
 
 
 @app.cell

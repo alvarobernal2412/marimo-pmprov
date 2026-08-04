@@ -93,7 +93,8 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
           onSelect: () => {
             if (node.stateId === path[columnIndex]) return;
             path.splice(columnIndex + 1, path.length, node.stateId);
-            model.set("selection", { pickedStateId: node.stateId });
+            const current = (model.get("selection") as Record<string, unknown>) ?? {};
+            model.set("selection", { ...current, node: { pickedStateId: node.stateId } });
             model.save_changes();
             renderBreadcrumb();
             renderColumns();
