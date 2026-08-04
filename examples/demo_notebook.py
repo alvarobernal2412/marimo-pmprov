@@ -30,8 +30,10 @@ def _(MockProvenanceSource, ProvenancePanel, mode_toggle):
 
 @app.cell
 def _(mo, panel):
-    sidebar = mo.sidebar(panel.sidebar())
-    return (sidebar,)
+    # mo.sidebar(...) must be the last bare expression in this cell to render —
+    # it cannot be assigned to a variable and displayed from a different cell.
+    mo.sidebar(panel.sidebar())
+    return
 
 
 @app.cell
@@ -48,9 +50,8 @@ def _(mo, pd, show_table):
 
 
 @app.cell
-def _(mode_toggle, sidebar, panel):
+def _(mode_toggle):
     mode_toggle
-    sidebar
     return
 
 

@@ -102,18 +102,22 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
 
   function renderColumns(): void {
     columnsWrap.innerHTML = "";
-    path.forEach((stateId, columnIndex) => {
-      const column = document.createElement("div");
-      column.className = "pw-column";
+    // Render one column per path entry (already-selected nodes) plus one
+    // trailing preview column showing the children of the deepest selection —
+    // ready for the next click. Column 0 always shows just the root.
+    for (let columnIndex = 0; columnIndex <= path.length; columnIndex++) {
       const children =
         columnIndex === 0
-          ? [tree.nodes[stateId]]
+          ? [tree.nodes[path[0]]]
           : Object.values(tree.nodes).filter((n) => n.parentStateId === path[columnIndex - 1]);
+      if (columnIndex > 0 && children.length === 0) break;
+
+      const column = document.createElement("div");
+      column.className = "pw-column";
       children.forEach((node) => {
         const card = nodeCard(node, {
           onSelect: () => {
-            if (node.stateId === path[columnIndex]) return;
-            path.splice(columnIndex + 1, path.length, node.stateId);
+            path.splice(columnIndex, path.length, node.stateId);
             const current = (model.get("selection") as Record<string, unknown>) ?? {};
             model.set("selection", { ...current, node: { pickedStateId: node.stateId } });
             model.save_changes();
@@ -125,7 +129,7 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
         column.appendChild(card);
       });
       columnsWrap.appendChild(column);
-    });
+    }
     applyDimming();
   }
 

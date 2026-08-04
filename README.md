@@ -28,10 +28,16 @@ from provenance_widget.widget import ProvenancePanel
 from provenance_widget.display import show_table
 
 panel = ProvenancePanel(source=MockProvenanceSource(), mode="student")
-sidebar = mo.sidebar(panel.sidebar())
 
+# mo.sidebar(...) must be the last bare expression in its own cell to render —
+# it cannot be assigned to a variable and displayed from a different cell.
+mo.sidebar(panel.sidebar())
+```
+
+```python
 # tag any displayed table so the sidebar's "Pick from notebook" picker can target it
 annotated_table = show_table(mo.ui.table(my_dataframe), artifact_id="art-1", artifact_name="my_dataframe")
+annotated_table
 ```
 
 ## Connecting a real pmprov-backed history
