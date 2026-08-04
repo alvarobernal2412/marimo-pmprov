@@ -8,7 +8,8 @@ interface AnyModel {
   save_changes(): void;
 }
 
-function allAnnotationsNewestFirst(tree: ProvenanceTreeJson): { stateId: string; annotation: AnnotationJson }[] {
+// Sequential order: oldest first, most recently created appended last.
+function allAnnotationsInSequence(tree: ProvenanceTreeJson): { stateId: string; annotation: AnnotationJson }[] {
   const rows: { stateId: string; annotation: AnnotationJson }[] = [];
   for (const node of Object.values(tree.nodes)) {
     for (const annotation of node.annotations) {
@@ -16,7 +17,7 @@ function allAnnotationsNewestFirst(tree: ProvenanceTreeJson): { stateId: string;
     }
   }
   for (const commit of model_commits) rows.push(commit);
-  return rows.sort((a, b) => (a.annotation.timestamp < b.annotation.timestamp ? 1 : -1));
+  return rows.sort((a, b) => (a.annotation.timestamp < b.annotation.timestamp ? -1 : 1));
 }
 
 let model_commits: { stateId: string; annotation: AnnotationJson }[] = [];
@@ -149,7 +150,7 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
 
   const rail = document.createElement("div");
   rail.className = "pw-commit-rail";
-  allAnnotationsNewestFirst(tree).forEach((row) => rail.appendChild(renderCommitCard(row, mode, model)));
+  allAnnotationsInSequence(tree).forEach((row) => rail.appendChild(renderCommitCard(row, mode, model)));
   container.appendChild(rail);
 
   if (mode === "student") {
