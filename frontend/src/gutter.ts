@@ -15,7 +15,12 @@ function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
   let node = el as HTMLElement | null;
   while (node) {
     if (node.dataset && node.dataset.pwArtifactId) return node;
-    node = node.parentElement;
+    if (node.parentElement) {
+      node = node.parentElement;
+    } else {
+      const root = node.getRootNode();
+      node = root instanceof ShadowRoot ? (root.host as HTMLElement) : null;
+    }
   }
   return null;
 }
@@ -81,7 +86,7 @@ export function armGutterAffordance(
       hideButton();
       return;
     }
-    const target = findTaggedAncestor(evt.target);
+    const target = findTaggedAncestor(evt.composedPath()[0] ?? evt.target);
     if (target) {
       showButtonFor(target);
     }
@@ -93,7 +98,7 @@ export function armGutterAffordance(
     if (related && (currentTarget.contains(related) || related === button || button?.contains(related))) {
       return;
     }
-    const target = findTaggedAncestor(evt.target);
+    const target = findTaggedAncestor(evt.composedPath()[0] ?? evt.target);
     if (target !== currentTarget) return;
     hideButton();
   });

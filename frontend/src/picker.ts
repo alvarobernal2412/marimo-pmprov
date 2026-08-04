@@ -15,7 +15,12 @@ function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
   let node = el as HTMLElement | null;
   while (node) {
     if (node.dataset && node.dataset.pwArtifactId) return node;
-    node = node.parentElement;
+    if (node.parentElement) {
+      node = node.parentElement;
+    } else {
+      const root = node.getRootNode();
+      node = root instanceof ShadowRoot ? (root.host as HTMLElement) : null;
+    }
   }
   return null;
 }
@@ -23,9 +28,12 @@ function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
 function refineGranularity(
   taggedElement: HTMLElement,
   clickTarget: HTMLElement,
+  path: EventTarget[],
 ): { granularity: string; detail: string | null } {
+  const containsAcrossShadow = (candidate: Element): boolean => path.includes(candidate);
+
   const td = clickTarget.closest("td");
-  if (td && taggedElement.contains(td)) {
+  if (td && containsAcrossShadow(td)) {
     const tr = td.parentElement;
     const colIndex = tr ? Array.from(tr.children).indexOf(td) : -1;
     const table = td.closest("table");
@@ -41,7 +49,7 @@ function refineGranularity(
   }
 
   const th = clickTarget.closest("th");
-  if (th && taggedElement.contains(th)) {
+  if (th && containsAcrossShadow(th)) {
     return { granularity: "column", detail: th.textContent?.trim() ?? null };
   }
 
@@ -59,7 +67,7 @@ export function armPicker(
   let lastHovered: HTMLElement | null = null;
 
   function onMouseMove(evt: MouseEvent): void {
-    const target = findTaggedAncestor(evt.target);
+    const target = findTaggedAncestor(evt.composedPath()[0] ?? evt.target);
     if (lastHovered && lastHovered !== target) {
       lastHovered.classList.remove("pw-picker-hover");
     }
@@ -70,8 +78,10 @@ export function armPicker(
   }
 
   function onClick(evt: MouseEvent): void {
-    const target = findTaggedAncestor(evt.target);
-    const clickTarget = evt.target as HTMLElement;
+    const path = evt.composedPath();
+    const originalTarget = (path[0] ?? evt.target) as HTMLElement;
+    const target = findTaggedAncestor(originalTarget);
+    const clickTarget = originalTarget;
     cleanup();
     if (!target) {
       onCancel?.();
@@ -79,7 +89,7 @@ export function armPicker(
     }
     evt.preventDefault();
     evt.stopPropagation();
-    const { granularity, detail } = refineGranularity(target, clickTarget);
+    const { granularity, detail } = refineGranularity(target, clickTarget, path);
     onPicked({
       artifactId: target.dataset.pwArtifactId!,
       artifactName: target.dataset.pwArtifactName ?? "",
