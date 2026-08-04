@@ -30,3 +30,17 @@ def test_commit_annotation_appends_to_commits_list():
 def test_sidebar_and_tree_surface_return_the_same_widget_instance():
     panel = ProvenancePanel(source=MockProvenanceSource())
     assert panel.sidebar() is panel.tree_surface()
+
+
+def test_request_restore_sets_restore_request_with_tag():
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    panel.request_restore("v1.1")
+    assert panel.widget.restore_request == {"tag": "v1.1"}
+
+
+def test_acknowledge_restore_clears_request_and_sets_ack():
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    panel.request_restore("v1.1")
+    panel.acknowledge_restore()
+    assert panel.widget.restore_request == {}
+    assert panel.widget.restore_ack == {"acknowledged": True}
