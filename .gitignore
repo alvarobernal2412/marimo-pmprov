@@ -6,3 +6,5 @@ dist/
 *.egg-info/
 .venv/
 __marimo__/
+docs/
+project/
