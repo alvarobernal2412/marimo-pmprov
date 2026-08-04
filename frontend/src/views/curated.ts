@@ -58,9 +58,53 @@ function renderCommitCard(row: { stateId: string; annotation: AnnotationJson }, 
   return card;
 }
 
+const GRANULARITY_LABEL: Record<string, string> = {
+  dataset: "Whole dataset",
+  column: "Column",
+  row_subset: "Row subset",
+  cell: "Cell",
+  chart_selection: "Chart selection",
+};
+
+function renderTargetSelector(model: AnyModel): HTMLElement {
+  const target = document.createElement("div");
+  target.className = "pw-target-selector";
+
+  const selection = (model.get("selection") as { artifact?: Record<string, unknown> })?.artifact ?? {};
+  const artifactId = selection.artifactId ? String(selection.artifactId) : null;
+
+  if (!artifactId) {
+    target.classList.add("pw-target-selector-empty");
+    target.textContent = "No target selected — use \"Pick from notebook\" or hover an element's \"+\".";
+    return target;
+  }
+
+  const artifactName = selection.artifactName ? String(selection.artifactName) : artifactId;
+  const granularity = selection.granularity ? String(selection.granularity) : "dataset";
+  const detail = selection.detail ? String(selection.detail) : null;
+  const granularityLabel = GRANULARITY_LABEL[granularity] ?? granularity;
+
+  const label = document.createElement("div");
+  label.className = "pw-target-selector-label";
+  label.textContent = "Target";
+  target.appendChild(label);
+
+  const value = document.createElement("div");
+  value.className = "pw-target-selector-value";
+  value.textContent = detail
+    ? `${artifactName} · ${granularityLabel}: ${detail}`
+    : `${artifactName} · ${granularityLabel}`;
+  value.title = `artifact id: ${artifactId}`;
+  target.appendChild(value);
+
+  return target;
+}
+
 function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
   const composer = document.createElement("div");
   composer.className = "pw-composer";
+
+  composer.appendChild(renderTargetSelector(model));
 
   const noteField = document.createElement("textarea");
   noteField.placeholder = "Describe reasoning for this analytical step...";
