@@ -20,7 +20,15 @@ export function renderInspect(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
   const selection = (model.get("selection") as { node?: { pickedStateId?: string } }) ?? {};
-  const stateId = selection.node?.pickedStateId ?? tree.rootId;
+  const pickedStateId = selection.node?.pickedStateId;
+  if (pickedStateId === undefined) {
+    const empty = document.createElement("div");
+    empty.className = "pw-inspect-empty";
+    empty.textContent = "Click a node in the Tree tab to inspect it here.";
+    container.appendChild(empty);
+    return;
+  }
+  const stateId = pickedStateId;
   const node = tree.nodes[stateId];
 
   const breadcrumb = document.createElement("div");

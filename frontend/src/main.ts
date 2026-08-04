@@ -35,13 +35,32 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   const pickBtn = document.createElement("button");
   pickBtn.className = "pw-pick-btn";
   pickBtn.textContent = "Pick from notebook";
+  let armed = false;
+  function resetPickBtn(): void {
+    armed = false;
+    pickBtn.classList.remove("pw-pick-btn-armed");
+    pickBtn.textContent = "Pick from notebook";
+    document.body.classList.remove("pw-picking-active");
+  }
   pickBtn.addEventListener("click", () => {
-    armPicker(model, (selection) => {
-      const current = (model.get("selection") as Record<string, unknown>) ?? {};
-      model.set("selection", { ...current, artifact: selection });
-      model.save_changes();
-      renderBody();
-    });
+    if (armed) return;
+    armed = true;
+    pickBtn.classList.add("pw-pick-btn-armed");
+    pickBtn.textContent = "Picking… (Esc to cancel)";
+    document.body.classList.add("pw-picking-active");
+    armPicker(
+      model,
+      (selection) => {
+        resetPickBtn();
+        const current = (model.get("selection") as Record<string, unknown>) ?? {};
+        model.set("selection", { ...current, artifact: selection });
+        model.save_changes();
+        renderBody();
+      },
+      () => {
+        resetPickBtn();
+      },
+    );
   });
   pickerRow.appendChild(pickBtn);
 

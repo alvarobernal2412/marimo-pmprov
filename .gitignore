@@ -5,3 +5,4 @@ node_modules/
 dist/
 *.egg-info/
 .venv/
+__marimo__/

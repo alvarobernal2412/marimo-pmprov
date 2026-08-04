@@ -27,24 +27,45 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
 
+  const header = document.createElement("div");
+  header.className = "pw-tree-header";
+  const title = document.createElement("div");
+  title.className = "pw-tree-title";
+  title.textContent = "Curated History — Provenance Tree";
+  header.appendChild(title);
+  const caption = document.createElement("div");
+  caption.className = "pw-tree-caption";
+  caption.textContent =
+    "Click a card to drill into its branch. Use the legend below to highlight everything that touches one artifact.";
+  header.appendChild(caption);
+  container.appendChild(header);
+
   const breadcrumb = document.createElement("div");
   breadcrumb.className = "pw-breadcrumb";
   container.appendChild(breadcrumb);
 
-  const legend = document.createElement("div");
-  legend.className = "pw-artifact-legend";
+  const artifacts = collectArtifacts(tree);
   let activeArtifact: string | null = null;
-  collectArtifacts(tree).forEach((artifact) => {
-    const entry = document.createElement("button");
-    entry.className = "pw-legend-entry";
-    entry.textContent = artifact.name;
-    entry.addEventListener("click", () => {
-      activeArtifact = activeArtifact === artifact.id ? null : artifact.id;
-      applyDimming();
+  if (artifacts.length === 0) {
+    const legendEmpty = document.createElement("div");
+    legendEmpty.className = "pw-legend-empty";
+    legendEmpty.textContent = "No tagged artifacts yet";
+    container.appendChild(legendEmpty);
+  } else {
+    const legend = document.createElement("div");
+    legend.className = "pw-artifact-legend";
+    artifacts.forEach((artifact) => {
+      const entry = document.createElement("button");
+      entry.className = "pw-legend-entry";
+      entry.textContent = artifact.name;
+      entry.addEventListener("click", () => {
+        activeArtifact = activeArtifact === artifact.id ? null : artifact.id;
+        applyDimming();
+      });
+      legend.appendChild(entry);
     });
-    legend.appendChild(entry);
-  });
-  container.appendChild(legend);
+    container.appendChild(legend);
+  }
 
   const columnsWrap = document.createElement("div");
   columnsWrap.className = "pw-columns";

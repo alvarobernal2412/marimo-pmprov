@@ -41,6 +41,8 @@ export function nodeCard(
   }
 
   if (opts.onSelect) {
+    card.style.cursor = "pointer";
+    card.title = "Click to expand";
     card.addEventListener("click", opts.onSelect);
   }
 
