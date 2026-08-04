@@ -54,7 +54,8 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
 
   function applyDimming(): void {
     columnsWrap.querySelectorAll<HTMLElement>(".pw-node-card").forEach((card) => {
-      const stateId = card.dataset.stateId!;
+      const stateId = card.dataset.stateId;
+      if (!stateId) return;
       const node = tree.nodes[stateId];
       const dim = activeArtifact !== null && !nodeTouchesArtifact(node, activeArtifact);
       card.classList.toggle("pw-dimmed", dim);
@@ -90,6 +91,7 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
       children.forEach((node) => {
         const card = nodeCard(node, {
           onSelect: () => {
+            if (node.stateId === path[columnIndex]) return;
             path.splice(columnIndex + 1, path.length, node.stateId);
             model.set("selection", { pickedStateId: node.stateId });
             model.save_changes();
