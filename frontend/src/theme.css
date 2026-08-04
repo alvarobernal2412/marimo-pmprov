@@ -10,6 +10,7 @@
 @media (prefers-color-scheme: dark) {
   .pw-root { color: #F8FAFC; background: #0F172A; }
 }
+.pw-root.pw-collapsed .pw-content { display: none; }
 
 body.pw-picking-active * { cursor: crosshair !important; }
 
@@ -29,8 +30,10 @@ body.pw-picking-active * { cursor: crosshair !important; }
 @media (prefers-color-scheme: dark) {
   .pw-node-card, .pw-commit-card { background: #1E293B; border-color: #334155; }
 }
-.pw-node-card.pw-dimmed { opacity: 0.25; }
 .pw-node-card.pw-picker-hover, .pw-annotatable.pw-picker-hover { outline: 2px solid #F59E0B; }
+.pw-node-card-selected { outline: 2px solid #0EA5E9; }
+.pw-node-card-collapsed { padding: 6px 10px; margin-bottom: 4px; }
+.pw-node-card-collapsed .pw-node-title { font-weight: 500; opacity: 0.55; margin: 0; }
 
 .pw-op-badge { font-size: 11px; text-transform: uppercase; color: var(--category-color, #64748B); font-weight: 600; }
 .pw-node-title { font-weight: 700; margin: 2px 0; }
@@ -62,15 +65,53 @@ body.pw-picking-active * { cursor: crosshair !important; }
   font-family: ui-monospace, monospace;
 }
 
-.pw-columns { display: flex; overflow-x: auto; gap: 12px; min-width: 0; }
+.pw-columns-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.pw-columns { display: flex; gap: 12px; min-width: 0; }
 .pw-column { min-width: 260px; }
-.pw-breadcrumb { font-size: 12px; color: #64748B; margin-bottom: 8px; }
+.pw-breadcrumb { flex: 0 0 auto; font-size: 12px; color: #64748B; margin-bottom: 8px; }
 .pw-breadcrumb-sep { margin: 0 6px; }
-.pw-artifact-legend { display: flex; gap: 6px; margin-bottom: 8px; min-width: 0; }
-.pw-legend-entry { border: 1px solid #94A3B8; border-radius: 6px; background: transparent; cursor: pointer; padding: 2px 8px; font-size: 12px; }
-.pw-legend-empty { font-size: 12px; color: #64748B; font-style: italic; margin-bottom: 8px; }
 
-.pw-tree-header { margin-bottom: 8px; }
+.pw-filter-bar { flex: 0 0 auto; margin-bottom: 8px; }
+.pw-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; min-width: 0; }
+.pw-filter-label { font-size: 11px; text-transform: uppercase; color: #64748B; font-weight: 600; min-width: 90px; }
+.pw-filter-chip {
+  border: 1px solid #94A3B8;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.pw-filter-chip-active { background: #0EA5E9; border-color: #0EA5E9; color: white; }
+.pw-filter-chip-empty { border-style: dashed; color: #64748B; font-style: italic; cursor: default; }
+
+.pw-tree-inspect-pane {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  background: #F1F5F9;
+  padding: 10px 14px 14px;
+  max-height: 38%;
+  overflow: auto;
+}
+@media (prefers-color-scheme: dark) {
+  .pw-tree-inspect-pane { border-color: #334155; background: #1E293B; }
+}
+.pw-tree-inspect-pane-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 8px;
+}
+@media (prefers-color-scheme: dark) { .pw-tree-inspect-pane-label { color: #94A3B8; } }
+.pw-tree-inspect-pane-empty { color: #64748B; font-size: 13px; font-style: italic; }
+
+.pw-tree-portal .pw-column { min-width: 300px; }
+
+.pw-tree-header { flex: 0 0 auto; margin-bottom: 8px; }
 .pw-tree-title { font-weight: 700; font-size: 15px; }
 .pw-tree-caption { font-size: 12px; color: #64748B; margin-top: 2px; }
 
@@ -90,6 +131,9 @@ body.pw-picking-active * { cursor: crosshair !important; }
 @media (prefers-color-scheme: dark) { .pw-target-selector-value { color: #F8FAFC; } }
 .pw-commit-btn { background: #0F172A; color: white; border: none; border-radius: 6px; padding: 8px; cursor: pointer; }
 @media (prefers-color-scheme: dark) { .pw-commit-btn { background: #F8FAFC; color: #0F172A; } }
+
+.pw-config-heading { font-size: 11px; text-transform: uppercase; color: #64748B; font-weight: 600; margin-bottom: 6px; }
+.pw-config-radio { display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; text-transform: capitalize; }
 
 .pw-restore-banner { background: #FEF3C7; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; margin-bottom: 8px; font-size: 13px; }
 .pw-pick-btn { border: 1px dashed #94A3B8; background: transparent; border-radius: 6px; padding: 6px; cursor: pointer; margin-top: 4px; }

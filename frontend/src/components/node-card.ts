@@ -5,19 +5,35 @@ import { artifactBadge } from "./artifact-badge";
 
 export function nodeCard(
   node: ProvenanceNodeJson,
-  opts: { onSelect?: () => void } = {},
+  opts: { onSelect?: () => void; selected?: boolean; collapsed?: boolean } = {},
 ): HTMLElement {
   const card = document.createElement("div");
   card.className = "pw-node-card";
+  if (opts.collapsed) card.classList.add("pw-node-card-collapsed");
+  if (opts.selected) card.classList.add("pw-node-card-selected");
   card.dataset.stateId = node.stateId;
   card.style.setProperty("--category-color", CATEGORY_COLOR[node.operation.category] ?? "#64748B");
+
+  const annotation = node.annotations[0];
+
+  if (opts.collapsed) {
+    const title = document.createElement("div");
+    title.className = "pw-node-title";
+    title.textContent = annotation ? annotation.title : node.operation.name;
+    card.appendChild(title);
+    if (opts.onSelect) {
+      card.style.cursor = "pointer";
+      card.title = "Click to expand";
+      card.addEventListener("click", opts.onSelect);
+    }
+    return card;
+  }
 
   const badge = document.createElement("div");
   badge.className = "pw-op-badge";
   badge.textContent = node.operation.category.replace("_", " ");
   card.appendChild(badge);
 
-  const annotation = node.annotations[0];
   const title = document.createElement("div");
   title.className = "pw-node-title";
   title.textContent = annotation ? annotation.title : node.operation.name;
