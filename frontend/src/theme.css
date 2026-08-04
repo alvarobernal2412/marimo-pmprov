@@ -1,0 +1,14 @@
+.pw-root {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: #0F172A;
+  background: #F8FAFC;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .pw-root {
+    color: #F8FAFC;
+    background: #0F172A;
+  }
+}
