@@ -73,7 +73,10 @@ export function armPicker(
     const target = findTaggedAncestor(evt.target);
     const clickTarget = evt.target as HTMLElement;
     cleanup();
-    if (!target) return;
+    if (!target) {
+      onCancel?.();
+      return;
+    }
     evt.preventDefault();
     evt.stopPropagation();
     const { granularity, detail } = refineGranularity(target, clickTarget);
