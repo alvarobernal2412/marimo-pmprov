@@ -20,10 +20,20 @@ function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
   return null;
 }
 
+const armedModels = new WeakSet<AnyModel>();
+
+// NOTE: this widget is designed as a single docked sidebar instance per notebook
+// (per the design spec). If multiple ProvenanceWidget instances are ever rendered
+// simultaneously in one notebook, their gutter listeners are not mutually isolated —
+// each will react to hovers over any tagged element regardless of which widget
+// instance "owns" it. This is a known limitation, not addressed in this pass.
 export function armGutterAffordance(
   model: AnyModel,
   onPick: (selection: PickedSelection) => void,
 ): void {
+  if (armedModels.has(model)) return;
+  armedModels.add(model);
+
   let button: HTMLButtonElement | null = null;
   let currentTarget: HTMLElement | null = null;
 
@@ -67,7 +77,7 @@ export function armGutterAffordance(
   }
 
   document.addEventListener("mouseover", (evt: MouseEvent) => {
-    if (model.get("mode") !== "student") {
+    if (model.get("mode") !== "student" || document.body.classList.contains("pw-picking-active")) {
       hideButton();
       return;
     }
