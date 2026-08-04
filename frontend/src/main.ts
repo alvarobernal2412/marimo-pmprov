@@ -4,6 +4,7 @@ import { renderCurated } from "./views/curated";
 import { renderTree } from "./views/tree";
 import { renderInspect } from "./views/inspect";
 import { armPicker } from "./picker";
+import { armGutterAffordance } from "./gutter";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -115,6 +116,18 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   model.on("change:tree", renderBody);
   model.on("change:commits", renderBody);
   model.on("change:restore_request", renderRestoreBanner);
+
+  armGutterAffordance(model, (selection) => {
+    if (model.get("active_tab") !== "curated") {
+      model.set("active_tab", "curated");
+    }
+    const current = (model.get("selection") as Record<string, unknown>) ?? {};
+    model.set("selection", { ...current, artifact: selection });
+    model.save_changes();
+    renderTabs();
+    renderBody();
+    body.querySelector<HTMLTextAreaElement>(".pw-composer textarea")?.focus();
+  });
 }
 
 export default { render };

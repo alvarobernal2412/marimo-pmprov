@@ -88,3 +88,23 @@ body.pw-picking-active * { cursor: crosshair !important; }
 .pw-restore-banner { background: #FEF3C7; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; margin-bottom: 8px; font-size: 13px; }
 .pw-pick-btn { border: 1px dashed #94A3B8; background: transparent; border-radius: 6px; padding: 6px; cursor: pointer; margin-top: 4px; }
 .pw-pick-btn-armed { border: 1px solid #F59E0B; background: color-mix(in srgb, #F59E0B 15%, transparent); color: #F59E0B; font-weight: 600; }
+
+.pw-gutter-plus {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #0EA5E9;
+  color: white;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+  z-index: 1000;
+}
+.pw-gutter-plus:hover { background: #0284C7; }
