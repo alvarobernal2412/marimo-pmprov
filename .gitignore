@@ -5,6 +5,3 @@ node_modules/
 dist/
 *.egg-info/
 .venv/
-provenance_widget/static/widget.js
-provenance_widget/static/widget.css
-provenance_widget/static/widget.js.map
