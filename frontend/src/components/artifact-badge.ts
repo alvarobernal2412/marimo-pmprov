@@ -1,6 +1,6 @@
 import type { ArtifactRefJson } from "../types";
 
-const GRANULARITY_LABEL: Record<string, string> = {
+export const GRANULARITY_LABEL: Record<string, string> = {
   dataset: "Whole dataset",
   column: "Column",
   row_subset: "Row subset",

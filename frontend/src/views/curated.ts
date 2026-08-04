@@ -1,6 +1,6 @@
 import type { AnnotationJson, ProvenanceTreeJson } from "../types";
 import { tagChip } from "../components/tag-chip";
-import { artifactBadge } from "../components/artifact-badge";
+import { artifactBadge, GRANULARITY_LABEL } from "../components/artifact-badge";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -57,14 +57,6 @@ function renderCommitCard(row: { stateId: string; annotation: AnnotationJson }, 
 
   return card;
 }
-
-const GRANULARITY_LABEL: Record<string, string> = {
-  dataset: "Whole dataset",
-  column: "Column",
-  row_subset: "Row subset",
-  cell: "Cell",
-  chart_selection: "Chart selection",
-};
 
 function renderTargetSelector(model: AnyModel): HTMLElement {
   const target = document.createElement("div");
