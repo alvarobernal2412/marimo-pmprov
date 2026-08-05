@@ -1,3 +1,5 @@
+import { resolveDetail } from "./resolvers";
+
 interface AnyModel {
   get(key: string): unknown;
   set(key: string, value: unknown): void;
@@ -30,28 +32,11 @@ function refineGranularity(
   clickTarget: HTMLElement,
   path: EventTarget[],
 ): { granularity: string; detail: string | null } {
-  const containsAcrossShadow = (candidate: Element): boolean => path.includes(candidate);
-
-  const td = clickTarget.closest("td");
-  if (td && containsAcrossShadow(td)) {
-    const tr = td.parentElement;
-    const colIndex = tr ? Array.from(tr.children).indexOf(td) : -1;
-    const table = td.closest("table");
-    let columnName: string | null = null;
-    if (table && colIndex >= 0) {
-      const headerCell = table.querySelector("thead tr")?.children[colIndex];
-      columnName = headerCell?.textContent?.trim() ?? null;
-    }
-    const tbody = tr?.parentElement;
-    const rowIndex = tr && tbody ? Array.from(tbody.children).indexOf(tr) : -1;
-    const detail = columnName ? `row ${rowIndex}, column ${columnName}` : `row ${rowIndex}`;
-    return { granularity: "cell", detail };
-  }
-
-  const th = clickTarget.closest("th");
-  if (th && containsAcrossShadow(th)) {
-    return { granularity: "column", detail: th.textContent?.trim() ?? null };
-  }
+  // Table cells, chart marks, and anything else "inside" an artifact are
+  // refined by pluggable resolvers (see resolvers.ts) — the picker itself
+  // doesn't know what a table or a chart is.
+  const resolved = resolveDetail(path, clickTarget);
+  if (resolved) return resolved;
 
   return {
     granularity: taggedElement.dataset.pwGranularity ?? "dataset",
