@@ -31,14 +31,32 @@ class ProvenancePanel:
         self._source = source
         self.widget = ProvenanceWidget(tree=tree_to_json(source.get_tree()), mode=mode)
 
+    @property
+    def source(self) -> ProvenanceSource:
+        return self._source
+
     def sidebar(self) -> ProvenanceWidget:
         return self.widget
 
     def tree_surface(self) -> ProvenanceWidget:
         return self.widget
 
-    def commit_annotation(self, annotation_dict: dict) -> None:
-        self.widget.commits = [*self.widget.commits, {"stateId": "python", "annotation": annotation_dict}]
+    def refresh(self) -> None:
+        """Re-pull the tree from the source.
+
+        For sources whose history grows over time (e.g. a live pmprov
+        RuntimeTracker being driven by an in-progress notebook run, as
+        opposed to MockProvenanceSource's fixed snapshot), call this after
+        new steps have been recorded so the sidebar reflects them.
+        """
+        self.widget.tree = tree_to_json(self._source.get_tree())
+        # Belt-and-braces: under marimo (unlike Jupyter), a Dict trait set
+        # from a cell that isn't itself re-running doesn't reliably push a
+        # fresh sync message to an already-displayed widget — force one.
+        self.widget.send_state(["tree"])
+
+    def commit_annotation(self, annotation_dict: dict, state_id: str = "python") -> None:
+        self.widget.commits = [*self.widget.commits, {"stateId": state_id, "annotation": annotation_dict}]
 
     def request_restore(self, tag: str) -> None:
         self.widget.restore_request = {"tag": tag}
