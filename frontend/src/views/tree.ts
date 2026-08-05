@@ -8,6 +8,16 @@ interface AnyModel {
   save_changes(): void;
 }
 
+// renderTree() is invoked fresh on every "tree"/"commits" trait change (a
+// selection click alone re-triggers one via save_changes()) — without this,
+// its local drill-down path would reset to the root on every such event,
+// undoing the very click that just extended it. Stashed on the model object
+// itself (not a JSON trait) so it survives across those re-renders but is
+// still scoped to this one widget instance.
+interface TreeNavState {
+  _pwTreePath?: string[];
+}
+
 interface ArtifactOption {
   id: string;
   name: string;
@@ -105,7 +115,11 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   inspectPane.appendChild(inspectPaneBody);
   container.appendChild(inspectPane);
 
-  const path: string[] = [tree.rootId];
+  const navState = model as unknown as TreeNavState;
+  if (!navState._pwTreePath || navState._pwTreePath[0] !== tree.rootId) {
+    navState._pwTreePath = [tree.rootId];
+  }
+  const path = navState._pwTreePath;
 
   function nodeMatchesFilters(node: ProvenanceNodeJson): boolean {
     const tagOk = activeTags.size === 0 || [...activeTags].some((t) => nodeHasTag(node, t));
