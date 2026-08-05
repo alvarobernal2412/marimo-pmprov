@@ -9,6 +9,9 @@ def _():
     import marimo as mo
     import pandas as pd
     import matplotlib
+    import altair as alt
+    import vl_convert as vlc
+    import plotly.express as px
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -20,11 +23,14 @@ def _():
     return (
         MockProvenanceSource,
         ProvenancePanel,
+        alt,
         mo,
         pd,
         plt,
+        px,
         show_chart,
         show_table,
+        vlc,
     )
 
 
@@ -114,6 +120,105 @@ def _(event_log, mo, plt, show_chart):
         mo.hstack([scatter_chart, hist_chart], justify="start"),
         heatmap_chart,
     ])
+    return
+
+
+@app.cell
+def _(alt, event_log, mo, show_chart, vlc):
+    # Unlike the matplotlib charts above (flat PNGs), Vega-Lite/Altair marks
+    # each bar with an aria-label carrying its data ("concept:name: Register;
+    # duration: 12.5; ..."), which the picker's "svg-mark" resolver
+    # (frontend/src/resolvers.ts) reads off directly — no extra wiring needed.
+    #
+    # marimo's default mo.as_html(chart) embeds Vega-Lite as an interactive
+    # <canvas> (or a rasterized <img>), neither of which has per-mark DOM
+    # nodes to click on — so here the chart is rendered straight to real
+    # inline SVG via vl-convert instead, which is what makes those
+    # aria-labeled <path> marks actually present in the page.
+    altair_chart = alt.Chart(event_log).mark_bar().encode(
+        x=alt.X(field="concept:name", type="nominal"),
+        y=alt.Y(field="duration", type="quantitative"),
+        color=alt.Color(field="case:concept:name", type="nominal"),
+    )
+    altair_svg = vlc.vegalite_to_svg(altair_chart.to_json())
+    annotated_altair_chart = show_chart(
+        mo.Html(altair_svg), artifact_id="art-duration-altair", artifact_name="Chart_DurationAltair"
+    )
+    annotated_altair_chart
+    return
+
+
+@app.cell
+def _(mo, show_chart):
+    # A hand-authored SVG, tagged by hand rather than relying on a charting
+    # library's own accessibility output. This is the general-purpose escape
+    # hatch: any visualization — a custom D3 diagram, a process map, a
+    # network graph — can be picked down to individual elements by putting
+    # data-pw-detail (and optionally data-pw-granularity) directly on the
+    # SVG nodes. The picker's "svg-mark" resolver (resolvers.ts) looks for
+    # exactly that attribute, so no picker code changes were needed for this.
+    #
+    # Reuses artifact_id="art-process-map" — the same artifact the "Baseline
+    # fitness" annotation in mock_source.py already references, so picking
+    # a node here and the tree's "Chart_ProcessMap" filter chip line up.
+    process_steps = ["Register", "Approve", "Archive"]
+    box_w, box_h, gap = 120, 48, 60
+    svg_width = len(process_steps) * box_w + (len(process_steps) - 1) * gap
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}" height="{box_h + 20}" '
+        f'viewBox="0 0 {svg_width} {box_h + 20}">',
+        '<defs><marker id="pw-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" '
+        'orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#64748B" /></marker></defs>',
+    ]
+    for i, step in enumerate(process_steps):
+        x = i * (box_w + gap)
+        svg_parts.append(
+            f'<g data-pw-detail="{step}" data-pw-granularity="node" role="graphics-symbol" '
+            f'aria-label="Process step: {step}">'
+            f'<rect x="{x}" y="0" width="{box_w}" height="{box_h}" rx="6" '
+            f'fill="#EFF6FF" stroke="#0EA5E9" stroke-width="2" />'
+            f'<text x="{x + box_w / 2}" y="{box_h / 2}" text-anchor="middle" '
+            f'dominant-baseline="middle" font-family="sans-serif" font-size="13">{step}</text>'
+            f"</g>"
+        )
+        if i < len(process_steps) - 1:
+            line_x1, line_x2 = x + box_w, x + box_w + gap
+            svg_parts.append(
+                f'<line x1="{line_x1}" y1="{box_h / 2}" x2="{line_x2 - 8}" y2="{box_h / 2}" '
+                f'stroke="#64748B" stroke-width="2" marker-end="url(#pw-arrow)" />'
+            )
+    svg_parts.append("</svg>")
+    process_map_svg = "".join(svg_parts)
+
+    annotated_process_map = show_chart(
+        mo.Html(process_map_svg), artifact_id="art-process-map", artifact_name="Chart_ProcessMap"
+    )
+    annotated_process_map
+    return
+
+
+@app.cell
+def _(event_log, mo, px, show_chart):
+    # A fourth chart library, for contrast: mo.ui.plotly renders inline
+    # (a <marimo-plotly> custom element — not the CDN-loading <iframe> that
+    # mo.as_html(plotly_fig) produces), so at least "chart_selection"-level
+    # picking works out of the box like any other artifact. Plotly's own SVG
+    # marks don't carry the aria-label convention Vega-Lite does, so unlike
+    # the Altair chart above, per-bar picking isn't automatic here — it's
+    # exactly the kind of case that would need its own resolver (see
+    # frontend/src/resolvers.ts) reading Plotly's "plotly_click" event data
+    # instead of guessing from the DOM.
+    plotly_fig = px.bar(
+        event_log.groupby("concept:name", as_index=False)["duration"].mean(),
+        x="concept:name",
+        y="duration",
+        color="concept:name",
+        title="Mean duration by activity (Plotly)",
+    )
+    annotated_plotly_chart = show_chart(
+        mo.ui.plotly(plotly_fig), artifact_id="art-duration-plotly", artifact_name="Chart_DurationPlotly"
+    )
+    annotated_plotly_chart
     return
 
 
