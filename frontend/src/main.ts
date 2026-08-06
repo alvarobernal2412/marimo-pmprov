@@ -88,7 +88,18 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     tabs.innerHTML = "";
     const activeTab = model.get("active_tab") as string;
     tabs.appendChild(
-      segmentedControl(["curated", "tree", "config"], activeTab, (value) => {
+      segmentedControl(
+        [
+          // Internal value stays "curated" (it's the synced active_tab
+          // default in widget.py) — only the displayed label changes, since
+          // this tab is really the chronological annotation history, not a
+          // curated/edited view.
+          { value: "curated", label: "Annotations" },
+          { value: "tree", label: "Tree" },
+          { value: "config", label: "Config" },
+        ],
+        activeTab,
+        (value) => {
         model.set("active_tab", value);
         model.save_changes();
       }),

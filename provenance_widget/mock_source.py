@@ -193,3 +193,15 @@ class MockProvenanceSource:
                 "branch-b": "conformance",
             },
         )
+
+    def state_for_artifact(self, artifact_id: str) -> str | None:
+        """Best-effort: MockProvenanceSource has no artifact registry either
+        (its ArtifactRefs are just hand-authored strings) — fall back to
+        whichever node's own baked-in annotations already reference this
+        artifact_id, since that's the closest thing to "produced it" here.
+        """
+        for node in self.get_tree().nodes.values():
+            for annotation in node.annotations:
+                if any(a.artifact_id == artifact_id for a in annotation.artifacts):
+                    return node.state_id
+        return None

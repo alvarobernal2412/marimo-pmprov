@@ -131,8 +131,17 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
       author: { agent_id: "agent-student", agent_type: "human", display_name: "S" },
       timestamp: new Date().toISOString(),
     };
+    // Resolve which analysis state this annotation belongs to from the
+    // artifact it targets — mirrors ProvenancePanel.commit_annotation()'s
+    // server-side resolution (see pmprov_adapter.py's state_for_artifact):
+    // an artifact_id built from a live pmprov state IS that state's id, so
+    // if it matches a node in the tree, that node produced this artifact.
+    const tree = model.get("tree") as ProvenanceTreeJson;
+    const targetArtifactId = newAnnotation.artifacts[0]?.artifactId;
+    const stateId = targetArtifactId && tree.nodes[targetArtifactId] ? targetArtifactId : "composer";
+
     const existing = model.get("commits") as unknown[];
-    model.set("commits", [...existing, { stateId: "composer", annotation: newAnnotation }]);
+    model.set("commits", [...existing, { stateId, annotation: newAnnotation }]);
     model.save_changes();
     noteField.value = "";
     tagField.value = "";
@@ -147,6 +156,18 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
   const tree = model.get("tree") as ProvenanceTreeJson;
   const mode = model.get("mode") as string;
   model_commits = model.get("commits") as { stateId: string; annotation: AnnotationJson }[];
+
+  const header = document.createElement("div");
+  header.className = "pw-tree-header";
+  const title = document.createElement("div");
+  title.className = "pw-tree-title";
+  title.textContent = "Annotation History";
+  header.appendChild(title);
+  const caption = document.createElement("div");
+  caption.className = "pw-tree-caption";
+  caption.textContent = "Every annotation made in this analysis, oldest first.";
+  header.appendChild(caption);
+  container.appendChild(header);
 
   const rail = document.createElement("div");
   rail.className = "pw-commit-rail";

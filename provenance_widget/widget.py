@@ -55,7 +55,23 @@ class ProvenancePanel:
         # fresh sync message to an already-displayed widget — force one.
         self.widget.send_state(["tree"])
 
-    def commit_annotation(self, annotation_dict: dict, state_id: str = "python") -> None:
+    def commit_annotation(self, annotation_dict: dict, state_id: str | None = None) -> None:
+        """Record an annotation, associating it with an analysis state.
+
+        Pass state_id explicitly to force it. Otherwise this resolves it
+        from the annotation's own targeted artifact(s), via the source's
+        `state_for_artifact()` — the state that contains/produced the
+        artifact the annotation is actually about. Falls back to "python"
+        if no artifact resolves (e.g. a general note not tied to output).
+        """
+        if state_id is None:
+            for ref in annotation_dict.get("artifacts") or []:
+                resolved = self._source.state_for_artifact(ref.get("artifactId", ""))
+                if resolved:
+                    state_id = resolved
+                    break
+        if state_id is None:
+            state_id = "python"
         self.widget.commits = [*self.widget.commits, {"stateId": state_id, "annotation": annotation_dict}]
 
     def request_restore(self, tag: str) -> None:

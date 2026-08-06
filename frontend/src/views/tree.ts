@@ -1,4 +1,4 @@
-import type { ProvenanceNodeJson, ProvenanceTreeJson } from "../types";
+import type { AnnotationJson, ProvenanceNodeJson, ProvenanceTreeJson } from "../types";
 import { nodeCard } from "../components/node-card";
 import { renderInspect } from "./inspect";
 import type { TreeNavState } from "../nav-state";
@@ -48,11 +48,27 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
 
+  // Sources like PmprovAdapter never populate node.annotations themselves
+  // (pmprov has no annotation concept of its own) — annotations only exist
+  // on the widget's "commits" list, keyed by whichever state_id they were
+  // resolved to (see ProvenancePanel.commit_annotation /
+  // state_for_artifact). Merge them in here so a node's card reflects every
+  // annotation actually associated with it, regardless of which mechanism
+  // produced it.
+  const commits = (model.get("commits") as { stateId: string; annotation: AnnotationJson }[]) ?? [];
+  for (const { stateId, annotation } of commits) {
+    const node = tree.nodes[stateId];
+    if (!node) continue;
+    if (!node.annotations.some((a) => a.annotationId === annotation.annotationId)) {
+      node.annotations = [...node.annotations, annotation];
+    }
+  }
+
   const header = document.createElement("div");
   header.className = "pw-tree-header";
   const title = document.createElement("div");
   title.className = "pw-tree-title";
-  title.textContent = "Curated History — Provenance Tree";
+  title.textContent = "Provenance Tree";
   header.appendChild(title);
   const caption = document.createElement("div");
   caption.className = "pw-tree-caption";
@@ -193,7 +209,7 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
       const node = tree.nodes[stateId];
       const crumb = document.createElement("span");
       crumb.className = "pw-breadcrumb-item";
-      crumb.textContent = node.annotations[0]?.title ?? node.operation.name;
+      crumb.textContent = node.operation.name;
       breadcrumb.appendChild(crumb);
       if (i < path.length - 1) {
         const sep = document.createElement("span");

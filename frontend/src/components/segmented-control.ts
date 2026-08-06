@@ -1,15 +1,15 @@
 export function segmentedControl(
-  options: string[],
+  options: { value: string; label: string }[],
   active: string,
   onChange: (value: string) => void,
 ): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "pw-segmented-control";
-  options.forEach((opt) => {
+  options.forEach(({ value, label }) => {
     const btn = document.createElement("button");
-    btn.textContent = opt;
-    btn.className = opt === active ? "pw-segment pw-segment-active" : "pw-segment";
-    btn.addEventListener("click", () => onChange(opt));
+    btn.textContent = label;
+    btn.className = value === active ? "pw-segment pw-segment-active" : "pw-segment";
+    btn.addEventListener("click", () => onChange(value));
     wrap.appendChild(btn);
   });
   return wrap;

@@ -145,6 +145,19 @@ class PmprovAdapter:
 
         return ProvenanceTree(nodes=nodes, root_id=root_id, branches=branches)
 
+    def state_for_artifact(self, artifact_id: str) -> str | None:
+        """pmprov has no separate artifact registry — a "state" *is* the
+        DataFrame/artifact a step produced, so an artifact_id built from
+        `latest_state_id()` (the convention this adapter's callers use, see
+        the demo notebook) is already a real state_id. Confirm it still
+        exists in the current graph before handing it back.
+        """
+        history_id = self._rt._history.history_id
+        graph = self._rt.storage.load_graph(history_id)
+        if any(s["state_id"] == artifact_id for s in graph["states"]):
+            return artifact_id
+        return None
+
     def latest_state_id(self, func_name: str | None = None) -> str | None:
         """Return the output_state_id of the most recent step.
 

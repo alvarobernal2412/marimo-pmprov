@@ -107,3 +107,13 @@ class ProvenanceTree:
 
 class ProvenanceSource(Protocol):
     def get_tree(self) -> ProvenanceTree: ...
+
+    def state_for_artifact(self, artifact_id: str) -> str | None:
+        """Return the state_id of the analysis state that contains/produced
+        this artifact, or None if the source can't resolve it.
+
+        Used to associate a new annotation with the right tree node purely
+        from the artifact it targets, without the caller having to thread a
+        state_id through by hand.
+        """
+        ...
