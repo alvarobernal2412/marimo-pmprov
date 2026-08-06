@@ -1,21 +1,12 @@
 import type { ProvenanceNodeJson, ProvenanceTreeJson } from "../types";
 import { nodeCard } from "../components/node-card";
 import { renderInspect } from "./inspect";
+import type { TreeNavState } from "../nav-state";
 
 interface AnyModel {
   get(key: string): unknown;
   set(key: string, value: unknown): void;
   save_changes(): void;
-}
-
-// renderTree() is invoked fresh on every "tree"/"commits" trait change (a
-// selection click alone re-triggers one via save_changes()) — without this,
-// its local drill-down path would reset to the root on every such event,
-// undoing the very click that just extended it. Stashed on the model object
-// itself (not a JSON trait) so it survives across those re-renders but is
-// still scoped to this one widget instance.
-interface TreeNavState {
-  _pwTreePath?: string[];
 }
 
 interface ArtifactOption {
@@ -115,6 +106,12 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   inspectPane.appendChild(inspectPaneBody);
   container.appendChild(inspectPane);
 
+  // renderTree() is invoked fresh on every "tree"/"commits" trait change (a
+  // selection click alone re-triggers one via save_changes()) — without
+  // stashing this on the model (see nav-state.ts), the local drill-down path
+  // would reset to the root on every such event, undoing the very click that
+  // just extended it. The curated view reads the same stashed path to know
+  // which branch is "active" — see views/curated.ts.
   const navState = model as unknown as TreeNavState;
   if (!navState._pwTreePath || navState._pwTreePath[0] !== tree.rootId) {
     navState._pwTreePath = [tree.rootId];
@@ -207,29 +204,76 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
     });
   }
 
+  // Depth = distance from the tree root along parentStateId edges. Every
+  // node in the whole tree gets grouped by depth (not just descendants of
+  // the confirmed path) so the landscape shows every branch at once, the
+  // way the columns used to only show the branch being drilled into.
+  function depthOf(stateId: string, cache: Map<string, number>): number {
+    const cached = cache.get(stateId);
+    if (cached !== undefined) return cached;
+    const node = tree.nodes[stateId];
+    const depth = node.parentStateId ? depthOf(node.parentStateId, cache) + 1 : 0;
+    cache.set(stateId, depth);
+    return depth;
+  }
+
+  function drawConnectors(cardEls: Map<string, HTMLElement>): void {
+    columnsWrap.querySelector("svg.pw-tree-lines")?.remove();
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "pw-tree-lines");
+    svg.setAttribute("width", String(columnsWrap.scrollWidth));
+    svg.setAttribute("height", String(columnsWrap.scrollHeight));
+
+    const containerRect = columnsWrap.getBoundingClientRect();
+    for (const [stateId, el] of cardEls) {
+      const node = tree.nodes[stateId];
+      const parentEl = node.parentStateId ? cardEls.get(node.parentStateId) : undefined;
+      if (!parentEl) continue;
+      const r1 = parentEl.getBoundingClientRect();
+      const r2 = el.getBoundingClientRect();
+      const x1 = r1.right - containerRect.left + columnsWrap.scrollLeft;
+      const y1 = r1.top + r1.height / 2 - containerRect.top + columnsWrap.scrollTop;
+      const x2 = r2.left - containerRect.left + columnsWrap.scrollLeft;
+      const y2 = r2.top + r2.height / 2 - containerRect.top + columnsWrap.scrollTop;
+      const midX = (x1 + x2) / 2;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      line.setAttribute("d", `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
+      line.setAttribute("class", path.includes(stateId) && path.includes(node.parentStateId ?? "")
+        ? "pw-tree-line-active"
+        : "pw-tree-line");
+      svg.appendChild(line);
+    }
+    columnsWrap.insertBefore(svg, columnsWrap.firstChild);
+  }
+
   function renderColumns(): void {
     columnsWrap.innerHTML = "";
     const selection = (model.get("selection") as { node?: { pickedStateId?: string } }) ?? {};
     const pickedStateId = selection.node?.pickedStateId;
-    // Render one column per path entry (already-selected nodes) plus one
-    // trailing preview column showing the children of the deepest selection —
-    // ready for the next click. Column 0 always shows just the root.
-    for (let columnIndex = 0; columnIndex <= path.length; columnIndex++) {
-      const children =
-        columnIndex === 0
-          ? [tree.nodes[path[0]]]
-          : Object.values(tree.nodes).filter((n) => n.parentStateId === path[columnIndex - 1]);
-      if (columnIndex > 0 && children.length === 0) break;
 
+    const depthCache = new Map<string, number>();
+    const byDepth = new Map<number, ProvenanceNodeJson[]>();
+    let maxDepth = 0;
+    for (const node of Object.values(tree.nodes)) {
+      const depth = depthOf(node.stateId, depthCache);
+      maxDepth = Math.max(maxDepth, depth);
+      (byDepth.get(depth) ?? byDepth.set(depth, []).get(depth)!).push(node);
+    }
+
+    const cardEls = new Map<string, HTMLElement>();
+    for (let depth = 0; depth <= maxDepth; depth++) {
       const column = document.createElement("div");
       column.className = "pw-column";
-      children.forEach((node) => {
-        const collapsed = filtersActive() && !nodeMatchesFilters(node);
+      (byDepth.get(depth) ?? []).forEach((node) => {
+        // Everything collapses to a single line by default — only the nodes
+        // on the path the user has actually clicked into render in full.
+        const onPath = path.includes(node.stateId);
+        const collapsed = !onPath || (filtersActive() && !nodeMatchesFilters(node));
         const card = nodeCard(node, {
           collapsed,
           selected: node.stateId === pickedStateId,
           onSelect: () => {
-            path.splice(columnIndex, path.length, node.stateId);
+            path.splice(depth, path.length, node.stateId);
             const current = (model.get("selection") as Record<string, unknown>) ?? {};
             model.set("selection", { ...current, node: { pickedStateId: node.stateId } });
             model.save_changes();
@@ -237,10 +281,12 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
             renderColumns();
           },
         });
+        cardEls.set(node.stateId, card);
         column.appendChild(card);
       });
       columnsWrap.appendChild(column);
     }
+    drawConnectors(cardEls);
     renderInspectPane();
   }
 

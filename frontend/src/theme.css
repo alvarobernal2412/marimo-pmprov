@@ -66,8 +66,13 @@ body.pw-picking-active * { cursor: crosshair !important; }
 }
 
 .pw-columns-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
-.pw-columns { display: flex; gap: 12px; min-width: 0; }
-.pw-column { min-width: 260px; }
+.pw-columns { display: flex; gap: 12px; min-width: 0; position: relative; }
+.pw-column { min-width: 260px; position: relative; z-index: 1; }
+
+.pw-tree-lines { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
+.pw-tree-line { fill: none; stroke: #CBD5E1; stroke-width: 1.5; }
+.pw-tree-line-active { fill: none; stroke: #0EA5E9; stroke-width: 2; }
+@media (prefers-color-scheme: dark) { .pw-tree-line { stroke: #334155; } }
 .pw-breadcrumb { flex: 0 0 auto; font-size: 12px; color: #64748B; margin-bottom: 8px; }
 .pw-breadcrumb-sep { margin: 0 6px; }
 
