@@ -5,7 +5,7 @@ import pathlib
 import anywidget
 import traitlets
 
-from provenance_widget.interfaces import ProvenanceSource
+from provenance_widget.interfaces import EmptyProvenanceSource, ProvenanceSource
 from provenance_widget.serialize import tree_to_json
 
 _STATIC_DIR = pathlib.Path(__file__).parent / "static"
@@ -27,8 +27,8 @@ class ProvenanceWidget(anywidget.AnyWidget):
 class ProvenancePanel:
     """Python-side façade wrapping one ProvenanceWidget instance."""
 
-    def __init__(self, source: ProvenanceSource, mode: str = "student"):
-        self._source = source
+    def __init__(self, source: ProvenanceSource | None = None, mode: str = "student"):
+        self._source = source if source is not None else EmptyProvenanceSource()
         self.widget = ProvenanceWidget(tree=tree_to_json(source.get_tree()), mode=mode)
 
     @property

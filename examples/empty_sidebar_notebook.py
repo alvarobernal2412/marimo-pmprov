@@ -8,10 +8,11 @@ app = marimo.App(width="full")
 def _():
     import marimo as mo
 
-    from provenance_widget.interfaces import EmptyProvenanceSource
     from provenance_widget.widget import ProvenancePanel
 
-    panel = ProvenancePanel(source=EmptyProvenanceSource(), mode="student")
+    # No source passed — before any history exists, ProvenancePanel defaults
+    # to an empty one.
+    panel = ProvenancePanel(mode="student")
     return mo, panel
 
 
