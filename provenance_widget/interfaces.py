@@ -117,3 +117,17 @@ class ProvenanceSource(Protocol):
         state_id through by hand.
         """
         ...
+
+
+class EmptyProvenanceSource:
+    """A ProvenanceSource with nothing recorded yet — no nodes, no artifacts.
+
+    For notebooks that want to show the widget before any real analysis
+    history exists (e.g. before a PmprovAdapter-backed session has started).
+    """
+
+    def get_tree(self) -> ProvenanceTree:
+        return ProvenanceTree(nodes={}, root_id="", branches={})
+
+    def state_for_artifact(self, artifact_id: str) -> str | None:
+        return None

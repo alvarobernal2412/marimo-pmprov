@@ -8,15 +8,8 @@ app = marimo.App(width="full")
 def _():
     import marimo as mo
 
-    from provenance_widget.interfaces import ProvenanceTree
+    from provenance_widget.interfaces import EmptyProvenanceSource
     from provenance_widget.widget import ProvenancePanel
-
-    class EmptyProvenanceSource:
-        def get_tree(self) -> ProvenanceTree:
-            return ProvenanceTree(nodes={}, root_id="", branches={})
-
-        def state_for_artifact(self, artifact_id: str) -> str | None:
-            return None
 
     panel = ProvenancePanel(source=EmptyProvenanceSource(), mode="student")
     return mo, panel
