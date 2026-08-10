@@ -1,53 +1,88 @@
 import marimo
 
+import sys
+from pathlib import Path
+
+
+def _find_project_root() -> Path:
+    here = Path.cwd()
+    for candidate in [here, *here.parents]:
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return here
+
+
+_project_root = _find_project_root()
+for _p in (_project_root, _project_root / "examples"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+# Activate pmprov's AST rewriting *before* app = marimo.App(...) below —
+# this must happen at true module level, not inside a cell. Marimo compiles
+# every @app.cell body to bytecode when its decorator runs, i.e. while this
+# module is first being imported/parsed — well before any cell's own code
+# executes. init_marimo() (called from a cell further down) also calls this
+# internally, but by then every cell's bytecode — including Step 1's — was
+# already compiled unpatched, so nothing would ever get tracked. See
+# tracker/kernel_hooks.py's own module docstring, which documents this
+# exact requirement.
+#
+# Only sys.path/sys.modules changes made here carry into cell bodies below —
+# marimo runs each @app.cell in its own scope, so a plain module-level
+# variable (like _project_root above) is *not* visible inside them the way
+# an ordinary Python closure would be. Cells that need the project root
+# recompute it themselves and pass it along the normal marimo way.
+import builtins as _builtins
+from tracker.kernel_hooks import _NoOpRuntime, patch_marimo_ast_compile
+from tracker import omit_functions
+
+_builtins._provtrack_runtime = _NoOpRuntime()
+patch_marimo_ast_compile()
+
+# Same compile-time-only constraint as the patch above applies to the omit
+# list: ProvTrackTransformer decides whether to wrap a call the moment that
+# call's cell is first compiled, which — for every cell in this file —
+# happens before any cell body runs. omit_functions() called from inside a
+# cell (as pmprov's own docs show) can only affect cells compiled *after*
+# that point, which in Marimo is none of them. It has to be here instead.
+# Without this, the widget's own plumbing calls (constructing the panel,
+# building the table, annotating it) would show up in the tree as steps
+# alongside the real pandas analysis — noise, not provenance.
+omit_functions(
+    "nunique", "mean", "sum", "min", "max",
+    "PmprovAdapter", "ProvenancePanel", "mo.ui.table", "show_table",
+)
+
 __generated_with = "0.23.16"
 app = marimo.App(width="full")
 
 
 @app.cell
 def _():
-    import sys
     from pathlib import Path
 
-    _here = Path.cwd()
-    PROJECT_ROOT = _here
-    for _candidate in [_here, *_here.parents]:
-        if (_candidate / "pyproject.toml").exists():
-            PROJECT_ROOT = _candidate
+    here = Path.cwd()
+    PROJECT_ROOT = here
+    for candidate in [here, *here.parents]:
+        if (candidate / "pyproject.toml").exists():
+            PROJECT_ROOT = candidate
             break
 
-    if str(PROJECT_ROOT) not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT))
-
-    EXAMPLES_DIR = PROJECT_ROOT / "examples"
-    if str(EXAMPLES_DIR) not in sys.path:
-        sys.path.insert(0, str(EXAMPLES_DIR))
-
-    INPUT_FILE_NAME = "rtfm_full.csv"
-    CASE_ID_COL = "case:concept:name"
-    TIMESTAMP_COL = "time:timestamp"
-    ACTIVITY_COL = "concept:name"
-
-    data_path = PROJECT_ROOT / "examples" / "data" / INPUT_FILE_NAME
-
+    data_path = PROJECT_ROOT / "examples" / "data" / "rtfm_full.csv"
     print("Project root:", PROJECT_ROOT)
     print("Data file   :", data_path, "found" if data_path.exists() else "NOT FOUND")
+
+    CASE_ID_COL = "case:concept:name"
+    TIMESTAMP_COL = "time:timestamp"
     return CASE_ID_COL, PROJECT_ROOT, TIMESTAMP_COL, data_path
 
 
 @app.cell
 def _(PROJECT_ROOT):
-    # Setup + init, all in one cell, exporting everything downstream tracked
-    # cells need (pd, rt, ...) — pmprov's README calls this out as a
-    # structural requirement: Marimo's reactive DAG only orders cells by the
-    # names they depend on, so a tracked cell that doesn't depend on
-    # something exported *from this cell* has no guarantee it runs (or gets
-    # its AST-rewritten bytecode compiled) after init_marimo() has patched
-    # the compiler and swapped in a real RuntimeTracker.
     import marimo as mo
     import pandas as pd
 
-    from tracker import init_marimo, omit_functions, operation_type, enable_logging
+    from tracker import init_marimo, operation_type, enable_logging
     from utils.event_enricher import (
         create_case_log,
         event_add_relative_case_time,
@@ -74,8 +109,6 @@ def _(PROJECT_ROOT):
     operation_type("attribute_derivation", event_add_relative_case_time)
     operation_type("attribute_derivation", case_add_activity_start_times)
     operation_type("case_filter", pd.DataFrame.apply)
-
-    omit_functions("nunique", "mean", "sum", "min", "max")
 
     print("Session ID   :", rt.session_id)
     print("History name :", rt._history.name)
