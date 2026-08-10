@@ -29,7 +29,7 @@ class ProvenancePanel:
 
     def __init__(self, source: ProvenanceSource | None = None, mode: str = "student"):
         self._source = source if source is not None else EmptyProvenanceSource()
-        self.widget = ProvenanceWidget(tree=tree_to_json(source.get_tree()), mode=mode)
+        self.widget = ProvenanceWidget(tree=tree_to_json(self._source.get_tree()), mode=mode)
 
     @property
     def source(self) -> ProvenanceSource:
