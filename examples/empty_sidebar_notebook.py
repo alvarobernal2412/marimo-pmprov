@@ -11,15 +11,6 @@ def _():
     from provenance_widget.interfaces import ProvenanceTree
     from provenance_widget.widget import ProvenancePanel
 
-    return ProvenanceTree, mo, ProvenancePanel
-
-
-@app.cell
-def _(ProvenanceTree):
-    # A genuinely empty tree — no nodes at all. Provenance is captured from
-    # real user executions (see PmprovAdapter, which writes the actual first
-    # state as soon as a session starts); a source with nothing recorded yet
-    # should report nothing, not a fabricated "session start" step.
     class EmptyProvenanceSource:
         def get_tree(self) -> ProvenanceTree:
             return ProvenanceTree(nodes={}, root_id="", branches={})
@@ -27,13 +18,8 @@ def _(ProvenanceTree):
         def state_for_artifact(self, artifact_id: str) -> str | None:
             return None
 
-    return (EmptyProvenanceSource,)
-
-
-@app.cell
-def _(EmptyProvenanceSource, ProvenancePanel):
     panel = ProvenancePanel(source=EmptyProvenanceSource(), mode="student")
-    return (panel,)
+    return mo, panel
 
 
 @app.cell
