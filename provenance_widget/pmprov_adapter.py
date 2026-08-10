@@ -44,64 +44,65 @@ def _map_category(name: str | None) -> StepCategory:
         return _DEFAULT_CATEGORY
 
 
-def _root_node(state_id: str, branch_id: str) -> ProvenanceNode:
-    return ProvenanceNode(
-        state_id=state_id,
-        parent_state_id=None,
-        branch_id=branch_id,
-        operation=Operation(
-            operation_id="root",
-            name="Session start",
-            operation_type="IMPORT",
-            command_name="init",
-            category=StepCategory.DATA_LOADING,
-        ),
-        params={},
-        delta=Delta([], [], row_count_before=0, row_count_after=0),
-        annotations=[],
-    )
-
-
 class PmprovAdapter:
     """Reads a pmprov RuntimeTracker's history as a ProvenanceTree.
 
     Unlike MockProvenanceSource's fixed snapshot, this tree grows as the
-    notebook runs — call `ProvenancePanel.refresh()` after each traced step
-    (once its writes have settled; see `settle()` in the pmprov README's
-    Marimo snippet) to pick up the new state.
+    notebook runs. Every read here settles the tracker's async storage queue
+    first (see `settle()`), so callers never need to do it themselves —
+    combined with ProvenancePanel's auto-refresh (see widget.py), tracked
+    cells don't need any provenance_widget-specific calls at all.
     """
 
     def __init__(self, tracker: Any) -> None:
         self._rt = tracker
 
+    def settle(self) -> None:
+        """Block until every write queued so far has landed in storage.
+
+        rt.storage runs writes through an async executor — without this,
+        a read immediately after a just-run tracked step can see the graph
+        as it was *before* that step, since the write may not have landed
+        yet. A single no-op task submitted to the same (FIFO, single-worker)
+        executor only completes once everything ahead of it has.
+        """
+        self._rt.storage._executor.submit(lambda: None).result()
+
     def get_tree(self) -> ProvenanceTree:
+        self.settle()
         history_id = self._rt._history.history_id
         graph = self._rt.storage.load_graph(history_id)
         states_by_id = {s["state_id"]: s for s in graph["states"]}
         steps = sorted(graph["steps"], key=lambda s: s["timestamp"])
 
+        if not steps:
+            # Nothing tracked yet — a genuinely empty tree, not a
+            # placeholder node (pmprov's own internal root state doesn't
+            # represent an analyst-visible step, so it's never shown).
+            return ProvenanceTree(nodes={}, root_id="", branches={})
+
         # pmprov's DuckDB/SQLite backend stores this as "" (empty string),
         # not NULL, for the root state — falsy check, not an `is None` one.
-        root_state = next(
-            (s for s in states_by_id.values() if not s["produced_by_step_id"]), None
+        tracker_root_id = next(
+            (s["state_id"] for s in states_by_id.values() if not s["produced_by_step_id"]), None
         )
-        if root_state is None:
-            # RuntimeTracker always writes its root state synchronously at
-            # init, so this only happens if get_tree() runs before that —
-            # fall back to an empty-but-valid single-node tree.
-            return ProvenanceTree(
-                nodes={"root": _root_node("root", "main")}, root_id="root", branches={"main": "main"}
-            )
 
-        root_id = root_state["state_id"]
-        nodes: dict[str, ProvenanceNode] = {root_id: _root_node(root_id, root_state["branch_id"])}
-        branches: dict[str, str] = {root_state["branch_id"]: "main"}
+        nodes: dict[str, ProvenanceNode] = {}
+        branches: dict[str, str] = {}
 
         # deltas only carry a net rows_delta, not before/after counts, so
         # row counts are approximated by walking the pipeline in order and
         # accumulating from 0 at the root — accurate for the common linear
         # case this adapter is meant for, not for arbitrary branch topologies.
-        running_rows: dict[str, int] = {root_id: 0}
+        running_rows: dict[str, int] = {tracker_root_id: 0}
+
+        # The first tracked step's output becomes the *displayed* root —
+        # pmprov's own tracker_root_id (its synthetic pre-tracking marker)
+        # is never added to `nodes`, so it never renders as a fake
+        # "session start" card. Any other step whose input was the tracker
+        # root gets reparented onto the display root instead (keeps the
+        # tree valid for the common single-branch case; see the note above).
+        display_root_id: str | None = None
 
         for step in steps:
             output_id = step["output_state_id"]
@@ -116,7 +117,14 @@ class PmprovAdapter:
             branches.setdefault(state["branch_id"], branch_name)
 
             parent_id = step["input_state_id"]
-            rows_before = running_rows.get(parent_id, 0)
+            is_first_real_step = parent_id == tracker_root_id
+            if is_first_real_step and display_root_id is None:
+                display_root_id = output_id
+                parent_id = None
+            elif is_first_real_step:
+                parent_id = display_root_id
+
+            rows_before = running_rows.get(parent_id, 0) if parent_id is not None else 0
             rows_after = rows_before + (delta_info.get("rows_delta") or 0)
             running_rows[output_id] = rows_after
 
@@ -143,7 +151,7 @@ class PmprovAdapter:
                 annotations=[],
             )
 
-        return ProvenanceTree(nodes=nodes, root_id=root_id, branches=branches)
+        return ProvenanceTree(nodes=nodes, root_id=display_root_id or "", branches=branches)
 
     def state_for_artifact(self, artifact_id: str) -> str | None:
         """pmprov has no separate artifact registry — a "state" *is* the
@@ -152,6 +160,7 @@ class PmprovAdapter:
         the demo notebook) is already a real state_id. Confirm it still
         exists in the current graph before handing it back.
         """
+        self.settle()
         history_id = self._rt._history.history_id
         graph = self._rt.storage.load_graph(history_id)
         if any(s["state_id"] == artifact_id for s in graph["states"]):
@@ -164,9 +173,9 @@ class PmprovAdapter:
         Pass func_name to disambiguate ("the last time X ran") if steps have
         happened since; omit it to just mean "whatever ran last". Convenience
         for notebooks that want to annotate "the step I just ran" without
-        threading state_ids through by hand — settle() first (see pmprov's
-        README) so the write has landed before this reads it.
+        threading state_ids through by hand.
         """
+        self.settle()
         history_id = self._rt._history.history_id
         steps = self._rt.storage.load_graph(history_id)["steps"]
         candidates = steps if func_name is None else [s for s in steps if s["func_name"] == func_name]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+import threading
 
 import anywidget
 import traitlets
@@ -24,12 +25,49 @@ class ProvenanceWidget(anywidget.AnyWidget):
     restore_ack = traitlets.Dict({}).tag(sync=True)
 
 
+_AUTO_REFRESH_INTERVAL_SECONDS = 0.75
+
+
 class ProvenancePanel:
     """Python-side façade wrapping one ProvenanceWidget instance."""
 
-    def __init__(self, source: ProvenanceSource | None = None, mode: str = "student"):
+    def __init__(self, source: ProvenanceSource | None = None, mode: str = "student", auto_refresh: bool = True):
         self._source = source if source is not None else EmptyProvenanceSource()
         self.widget = ProvenanceWidget(tree=tree_to_json(self._source.get_tree()), mode=mode)
+        self._auto_refresh_stop: threading.Event | None = None
+        # Sources like PmprovAdapter grow on their own as the notebook runs
+        # (a live pmprov RuntimeTracker being traced in the background) — for
+        # those, poll and push updates automatically so tracked cells don't
+        # need to call refresh() themselves. Sources with a fixed snapshot
+        # (MockProvenanceSource, EmptyProvenanceSource) have no settle()
+        # method and are skipped — there's nothing new to poll for.
+        if auto_refresh and hasattr(self._source, "settle"):
+            self._start_auto_refresh()
+
+    def _start_auto_refresh(self) -> None:
+        stop = threading.Event()
+        self._auto_refresh_stop = stop
+
+        def poll() -> None:
+            while not stop.wait(_AUTO_REFRESH_INTERVAL_SECONDS):
+                try:
+                    self.refresh()
+                except Exception:
+                    pass  # widget/comm may already be closed (kernel shutdown, cell re-run)
+
+        threading.Thread(target=poll, daemon=True).start()
+
+    def stop_auto_refresh(self) -> None:
+        """Stop the background poll thread, if one is running.
+
+        Each ProvenancePanel(...) call with an auto-refreshing source starts
+        its own thread; re-running that cell during interactive development
+        leaks the previous one unless this is called first. Not needed for
+        a notebook that constructs the panel once per session.
+        """
+        if self._auto_refresh_stop is not None:
+            self._auto_refresh_stop.set()
+            self._auto_refresh_stop = None
 
     @property
     def source(self) -> ProvenanceSource:
@@ -46,8 +84,11 @@ class ProvenancePanel:
 
         For sources whose history grows over time (e.g. a live pmprov
         RuntimeTracker being driven by an in-progress notebook run, as
-        opposed to MockProvenanceSource's fixed snapshot), call this after
-        new steps have been recorded so the sidebar reflects them.
+        opposed to MockProvenanceSource's fixed snapshot), this picks up
+        newly recorded steps. Called automatically by the auto-refresh
+        thread for sources that support it (see __init__); safe to call
+        manually too, e.g. to force an immediate update instead of waiting
+        for the next poll.
         """
         self.widget.tree = tree_to_json(self._source.get_tree())
         # Belt-and-braces: under marimo (unlike Jupyter), a Dict trait set
