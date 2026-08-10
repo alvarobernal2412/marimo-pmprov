@@ -130,7 +130,11 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   // which branch is "active" — see views/curated.ts.
   const navState = model as unknown as TreeNavState;
   if (!navState._pwTreePath || navState._pwTreePath[0] !== tree.rootId) {
-    navState._pwTreePath = [tree.rootId];
+    // tree.rootId may not resolve to a real node — sources with no captured
+    // history yet (nodes: {}) report a root_id anyway per the ProvenanceTree
+    // contract. Start the drill-down path empty rather than seeding it with
+    // a dangling id every lookup below would need to guard against.
+    navState._pwTreePath = tree.nodes[tree.rootId] ? [tree.rootId] : [];
   }
   const path = navState._pwTreePath;
 
