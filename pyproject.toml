@@ -2,7 +2,7 @@
 name = "marimo-pmprov"
 version = "0.1.0"
 description = "A marimo anywidget for analytic provenance and annotation, decoupled from pmprov."
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "anywidget>=0.9",
     "marimo>=0.9",
@@ -10,15 +10,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pmprov = ["pmprov @ git+https://github.com/alvarobernal2412/pmprov.git@main"]
 dev = ["pytest>=8.0", "pandas", "matplotlib", "altair", "vl-convert-python", "plotly"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["provenance_widget"]

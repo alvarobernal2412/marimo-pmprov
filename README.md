@@ -109,16 +109,13 @@ instead of mock data:
    model, per pmprov's `MODEL.md`). `Annotation`/`Tag` are new concepts not
    present in pmprov — the adapter is where you decide how they're sourced
    or persisted against a real history.
-2. Install this package with the `pmprov` extra, which pins a specific
-   pmprov version as a runtime dependency:
+2. Install `pmprov` alongside this package. PyPI doesn't allow published
+   packages to declare a direct VCS dependency, so there's no `pmprov`
+   extra — install it separately:
 
    ```bash
-   pip install "marimo-pmprov[pmprov]"
+   pip install marimo-pmprov "pmprov @ git+https://github.com/alvarobernal2412/pmprov.git@main"
    ```
-
-   (Update the pinned `pmprov @ git+https://github.com/<org>/pmprov.git@vX.Y.Z`
-   reference in `pyproject.toml` to the version you intend to depend on
-   before installing.)
 3. Pass your adapter instead of `MockProvenanceSource` to `ProvenancePanel`.
 
 ## Development
