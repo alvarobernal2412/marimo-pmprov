@@ -11,6 +11,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pandas", "matplotlib", "altair", "vl-convert-python", "plotly"]
+# For examples/provenance_demo-style notebooks that drive a real pmprov
+# RuntimeTracker. pmprov itself isn't listed here — PyPI rejects direct VCS
+# dependencies in published metadata (see git history) — install it
+# separately per the README's "Connecting a real pmprov-backed history".
+demo = ["networkx", "pydantic", "pyarrow"]
 
 [build-system]
 requires = ["hatchling"]
