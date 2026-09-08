@@ -49,6 +49,8 @@ class ProvenancePanel:
             active_tab=active_tab,
         )
         self._auto_refresh_stop: threading.Event | None = None
+        self._persisted_commit_count = 0
+        self.widget.observe(self._on_commits_changed, names="commits")
         # Sources like PmprovAdapter grow on their own as the notebook runs
         # (a live pmprov RuntimeTracker being traced in the background) — for
         # those, poll and push updates automatically so tracked cells don't
@@ -109,6 +111,26 @@ class ProvenancePanel:
         # from a cell that isn't itself re-running doesn't reliably push a
         # fresh sync message to an already-displayed widget — force one.
         self.widget.send_state(["tree"])
+
+    def _on_commits_changed(self, change: dict) -> None:
+        """Persist newly added commits through the source, if it supports it.
+
+        Fires for every growth of the `commits` trait — whether it came from
+        `commit_annotation()` below or the sidebar's JS composer setting the
+        trait directly — so both write paths persist through one place.
+        Sources without a `persist_annotation()` method (MockProvenanceSource,
+        EmptyProvenanceSource) are left exactly as ephemeral as before.
+        """
+        commits = change["new"] or []
+        new_commits = commits[self._persisted_commit_count:]
+        self._persisted_commit_count = len(commits)
+        if not hasattr(self._source, "persist_annotation"):
+            return
+        for commit in new_commits:
+            try:
+                self._source.persist_annotation(commit.get("stateId"), commit.get("annotation") or {})
+            except Exception:
+                pass  # a persistence failure shouldn't break the widget's own UI state
 
     def commit_annotation(self, annotation_dict: dict, state_id: str | None = None) -> None:
         """Record an annotation, associating it with an analysis state.

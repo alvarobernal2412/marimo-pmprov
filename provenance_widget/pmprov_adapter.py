@@ -1,11 +1,13 @@
 """ProvenanceSource adapter backed by a live pmprov RuntimeTracker.
 
 pmprov (https://github.com/alvarobernal2412/pmprov) records provenance
-automatically at the AST level — no explicit annotation concept exists there
-(see the pmprov README's own note on this). This adapter translates its
-state/step graph into the ProvenanceTree shape this widget renders; all
-annotation still happens on the marimo-pmprov side via
-`ProvenancePanel.commit_annotation()` or the sidebar's composer.
+automatically at the AST level, and — since pmprov 0.5.0 — also has its own
+Annotation/Tag concept (models.annotations), storable against any state/step
+via `rt.annotate()` / `rt.tag()`. This adapter translates pmprov's state/step
+graph into the ProvenanceTree shape this widget renders, including those
+annotations/tags (see `_load_annotations`), and persists new ones committed
+through `ProvenancePanel.commit_annotation()` / the sidebar's composer back
+into pmprov via `persist_annotation()`.
 
 Only imports pmprov lazily inside methods — marimo-pmprov itself has no
 hard dependency on pmprov (see the `pmprov` extra in pyproject.toml).
@@ -16,6 +18,9 @@ from __future__ import annotations
 from typing import Any
 
 from provenance_widget.interfaces import (
+    Agent,
+    Annotation,
+    ArtifactRef,
     ColumnAdded,
     ColumnRemoved,
     Delta,
@@ -23,7 +28,11 @@ from provenance_widget.interfaces import (
     ProvenanceNode,
     ProvenanceTree,
     StepCategory,
+    Tag,
 )
+
+_DEFAULT_TAG_COLOR = "#64748B"
+_TITLE_MAX_LEN = 40
 
 _DEFAULT_CATEGORY = StepCategory.ANALYSIS
 
@@ -56,6 +65,11 @@ class PmprovAdapter:
 
     def __init__(self, tracker: Any) -> None:
         self._rt = tracker
+        self._author = Agent(
+            agent_id=tracker._agent.agent_id,
+            agent_type=tracker._agent.agent_type.value,
+            display_name=tracker._agent.username or tracker._agent.agent_id,
+        )
 
     def settle(self) -> None:
         """Block until every write queued so far has landed in storage.
@@ -148,7 +162,7 @@ class PmprovAdapter:
                     row_count_before=rows_before,
                     row_count_after=rows_after,
                 ),
-                annotations=[],
+                annotations=self._load_annotations(output_id),
             )
 
         return ProvenanceTree(nodes=nodes, root_id=display_root_id or "", branches=branches)
@@ -182,3 +196,57 @@ class PmprovAdapter:
         if not candidates:
             return None
         return max(candidates, key=lambda s: s["timestamp"])["output_state_id"]
+
+    def _load_annotations(self, state_id: str) -> list[Annotation]:
+        """Translate pmprov's stored annotations/tags for *state_id* into this
+        widget's Annotation/Tag dataclasses.
+
+        pmprov tags aren't attached to individual annotations — they're
+        attached to the same (target_type, target_id) a state's annotations
+        are — so every annotation on a state shows that state's full tag set.
+        """
+        raw_annotations = self._rt.storage.load_annotations("analysis_state", state_id)
+        if not raw_annotations:
+            return []
+
+        tags = [
+            Tag(name=t["name"], color=_DEFAULT_TAG_COLOR)
+            for t in self._rt.storage.load_tags("analysis_state", state_id)
+        ]
+        artifacts = [ArtifactRef(artifact_id=state_id, artifact_name=state_id, granularity="dataset")]
+
+        return [
+            Annotation(
+                annotation_id=a["annotation_id"],
+                title=(a["text"][:_TITLE_MAX_LEN] or "Untitled annotation"),
+                note=a["text"],
+                tags=tags,
+                artifacts=artifacts,
+                author=self._author,
+                timestamp=a["created_at"],
+            )
+            for a in raw_annotations
+        ]
+
+    def persist_annotation(self, state_id: str, annotation_dict: dict) -> str | None:
+        """Persist a committed annotation (from `ProvenancePanel.commit_annotation()`
+        or the sidebar composer) into pmprov via `rt.annotate()` / `rt.tag()`.
+
+        Returns the new annotation's annotation_id, or None if state_id
+        doesn't resolve to a real state (e.g. the composer's "composer"
+        placeholder when nothing was targeted) or there's no text to save.
+        """
+        if not state_id or state_id in ("composer", "python"):
+            return None
+        text = annotation_dict.get("note") or annotation_dict.get("title") or ""
+        if not text:
+            return None
+
+        from models.annotations import AnnotatableType
+
+        annotation_id = self._rt.annotate([(AnnotatableType.ANALYSIS_STATE, state_id)], text)
+        for tag in annotation_dict.get("tags") or []:
+            name = tag.get("name") if isinstance(tag, dict) else None
+            if name:
+                self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
+        return annotation_id

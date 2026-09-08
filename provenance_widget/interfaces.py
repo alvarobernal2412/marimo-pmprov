@@ -118,6 +118,14 @@ class ProvenanceSource(Protocol):
         """
         ...
 
+    # Optional: implement to make committed annotations durable instead of
+    # ephemeral widget-trait state. Not part of the Protocol's required
+    # surface — ProvenancePanel checks for it with hasattr() (see widget.py)
+    # so sources without persistence (MockProvenanceSource, EmptyProvenanceSource)
+    # don't need a no-op implementation.
+    #
+    # def persist_annotation(self, state_id: str, annotation_dict: dict) -> str | None: ...
+
 
 class EmptyProvenanceSource:
     """A ProvenanceSource with nothing recorded yet — no nodes, no artifacts.
