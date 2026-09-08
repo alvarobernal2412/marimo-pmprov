@@ -84,22 +84,26 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   });
   pickerRow.appendChild(pickBtn);
 
+  function getVisibleTabs(): string[] {
+    const visible = model.get("visible_tabs") as string[] | undefined;
+    return visible && visible.length > 0 ? visible : ["curated", "tree", "config"];
+  }
+
   function renderTabs(): void {
     tabs.innerHTML = "";
     const activeTab = model.get("active_tab") as string;
+    const visibleTabs = getVisibleTabs();
+    const options = [
+      // Internal value stays "curated" (it's the synced active_tab
+      // default in widget.py) — only the displayed label changes, since
+      // this tab is really the chronological annotation history, not a
+      // curated/edited view.
+      { value: "curated", label: "Annotations" },
+      { value: "tree", label: "Tree" },
+      { value: "config", label: "Config" },
+    ].filter((option) => visibleTabs.includes(option.value));
     tabs.appendChild(
-      segmentedControl(
-        [
-          // Internal value stays "curated" (it's the synced active_tab
-          // default in widget.py) — only the displayed label changes, since
-          // this tab is really the chronological annotation history, not a
-          // curated/edited view.
-          { value: "curated", label: "Annotations" },
-          { value: "tree", label: "Tree" },
-          { value: "config", label: "Config" },
-        ],
-        activeTab,
-        (value) => {
+      segmentedControl(options, activeTab, (value) => {
         model.set("active_tab", value);
         model.save_changes();
       }),
@@ -176,7 +180,14 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   }
 
   function renderBody(): void {
-    const activeTab = model.get("active_tab") as string;
+    const visibleTabs = getVisibleTabs();
+    let activeTab = model.get("active_tab") as string;
+    if (!visibleTabs.includes(activeTab)) {
+      activeTab = visibleTabs[0];
+      model.set("active_tab", activeTab);
+      model.save_changes();
+      renderTabs();
+    }
     body.innerHTML = "";
     // marimo mounts a docked-desktop and a drawer-mobile copy of this widget
     // simultaneously and toggles which one is visible via CSS breakpoints —
@@ -221,7 +232,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   model.on("change:restore_request", renderRestoreBanner);
 
   armGutterAffordance(model, (selection) => {
-    if (model.get("active_tab") !== "curated") {
+    if (model.get("active_tab") !== "curated" && getVisibleTabs().includes("curated")) {
       model.set("active_tab", "curated");
     }
     const current = (model.get("selection") as Record<string, unknown>) ?? {};

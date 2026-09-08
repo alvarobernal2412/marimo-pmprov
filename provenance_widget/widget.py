@@ -19,6 +19,7 @@ class ProvenanceWidget(anywidget.AnyWidget):
     tree = traitlets.Dict({}).tag(sync=True)
     mode = traitlets.Unicode("student").tag(sync=True)
     active_tab = traitlets.Unicode("curated").tag(sync=True)
+    visible_tabs = traitlets.List(["curated", "tree", "config"]).tag(sync=True)
     selection = traitlets.Dict({}).tag(sync=True)
     commits = traitlets.List([]).tag(sync=True)
     restore_request = traitlets.Dict({}).tag(sync=True)
@@ -31,9 +32,22 @@ _AUTO_REFRESH_INTERVAL_SECONDS = 0.75
 class ProvenancePanel:
     """Python-side façade wrapping one ProvenanceWidget instance."""
 
-    def __init__(self, source: ProvenanceSource | None = None, mode: str = "student", auto_refresh: bool = True):
+    def __init__(
+        self,
+        source: ProvenanceSource | None = None,
+        mode: str = "student",
+        auto_refresh: bool = True,
+        tabs: list[str] | None = None,
+    ):
         self._source = source if source is not None else EmptyProvenanceSource()
-        self.widget = ProvenanceWidget(tree=tree_to_json(self._source.get_tree()), mode=mode)
+        visible_tabs = tabs if tabs is not None else ["curated", "tree", "config"]
+        active_tab = visible_tabs[0] if visible_tabs else "curated"
+        self.widget = ProvenanceWidget(
+            tree=tree_to_json(self._source.get_tree()),
+            mode=mode,
+            visible_tabs=visible_tabs,
+            active_tab=active_tab,
+        )
         self._auto_refresh_stop: threading.Event | None = None
         # Sources like PmprovAdapter grow on their own as the notebook runs
         # (a live pmprov RuntimeTracker being traced in the background) — for
