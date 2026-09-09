@@ -1,6 +1,13 @@
-"""Tests for PmprovAdapter against a real pmprov RuntimeTracker."""
+"""Tests for PmprovAdapter against a real pmprov RuntimeTracker.
+
+pmprov is an optional dependency (see README's "Connecting a real
+pmprov-backed history") — CI doesn't install it, so this whole module is
+skipped there rather than failing collection.
+"""
 import pandas as pd
 import pytest
+
+pytest.importorskip("tracker", reason="pmprov not installed")
 
 from tracker.storage import DuckDBSQLiteBackend as StorageBackend
 from tracker.runtime import RuntimeTracker
