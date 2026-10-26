@@ -43,16 +43,30 @@ panel = ProvenancePanel(source=MockProvenanceSource(), mode="student")
 mo.sidebar(panel.sidebar())
 ```
 
+The persona is chosen when the panel is created and can't be changed from
+the UI: `ProvenancePanel(mode="student")` or `mode="reviewer"`.
+
 The sidebar has three tabs:
 
-- **curated** — a chronological feed of committed annotations (oldest first,
-  newest appended at the bottom), plus a composer for writing new ones.
-- **tree** — a Miller-columns view of the full provenance history, with
-  filter chips for tags and linked artifacts (matching steps stay expanded,
-  the rest collapse to a single line) and an inspector pinned to the bottom
-  that opens automatically when you click a node.
-- **config** — switches between `student` (can annotate) and `reviewer`
-  (read-only, can request a restore to any tagged state) personas.
+- **Annotations** — a chronological feed (oldest first, each with a small
+  timestamp). *Student*: composer to add annotations, plus **Edit** and
+  **Delete** on every card (changes are written through to the source when it
+  supports `update_annotation` / `remove_annotation`, as `PmprovAdapter`
+  does). *Reviewer*: read-only, with a **Replay** button on every annotation.
+- **Tree** — a Miller-columns view of the full provenance history, with
+  filter chips for tags and linked artifacts and an inline inspector.
+- **Config** — shows the persona the panel was created with.
+
+#### Reviewer replay
+
+Reviewers get a debugger-style stepper (First / Back / Next / Latest, or the
+left/right arrow keys when it is focused) at the top of the Annotations and
+Tree tabs. Back/Next walk the provenance tree, Next remembers the branch you
+stepped back from (redo), and a branch picker appears where the analysis
+forks. **Latest** follows the most recent recorded state as the analysis
+grows. From Python: `panel.cursor_state_id`, `panel.latest_state_id`,
+`panel.go_to(state_id)`, `panel.go_latest()`, and `panel.widget.replay`
+(`{"stateId", "params", "isLatest"}`) for notebook cells that want to react.
 
 ### Tagging notebook outputs so they can be picked
 

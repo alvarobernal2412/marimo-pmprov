@@ -36,8 +36,8 @@ def _():
 
 @app.cell
 def _(MockProvenanceSource, ProvenancePanel):
-    # Persona (student/reviewer) is switched from the widget's own "config"
-    # tab, not a separate marimo control — this is just the initial value.
+    # The persona is fixed when the panel is created: "student" annotates
+    # (add/edit/delete), "reviewer" replays the analysis step by step.
     panel = ProvenancePanel(source=MockProvenanceSource(), mode="student")
     return (panel,)
 
