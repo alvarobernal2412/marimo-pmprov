@@ -1,62 +1,14 @@
 import type { AnnotationJson, ProvenanceTreeJson } from "../types";
-import { tagChip } from "../components/tag-chip";
-import { artifactBadge, GRANULARITY_LABEL } from "../components/artifact-badge";
+import { GRANULARITY_LABEL } from "../components/artifact-badge";
+import { annotationCard } from "../components/annotation-card";
+import { collectAnnotations } from "../annotations";
+import { cursorStateId, moveCursor } from "../replay";
+import { renderReplayBar } from "./replay-bar";
 
 interface AnyModel {
   get(key: string): unknown;
   set(key: string, value: unknown): void;
   save_changes(): void;
-}
-
-// Sequential order: oldest first, most recently created appended last.
-function allAnnotationsInSequence(tree: ProvenanceTreeJson): { stateId: string; annotation: AnnotationJson }[] {
-  const rows: { stateId: string; annotation: AnnotationJson }[] = [];
-  for (const node of Object.values(tree.nodes)) {
-    for (const annotation of node.annotations) {
-      rows.push({ stateId: node.stateId, annotation });
-    }
-  }
-  for (const commit of model_commits) rows.push(commit);
-  return rows.sort((a, b) => (a.annotation.timestamp < b.annotation.timestamp ? -1 : 1));
-}
-
-let model_commits: { stateId: string; annotation: AnnotationJson }[] = [];
-
-function renderCommitCard(row: { stateId: string; annotation: AnnotationJson }, mode: string, model: AnyModel): HTMLElement {
-  const card = document.createElement("div");
-  card.className = "pw-commit-card";
-  card.dataset.stateId = row.stateId;
-
-  const title = document.createElement("div");
-  title.className = "pw-node-title";
-  title.textContent = row.annotation.title;
-  card.appendChild(title);
-
-  const tags = document.createElement("div");
-  tags.className = "pw-node-tags";
-  row.annotation.tags.forEach((t) => {
-    const chip = tagChip(t);
-    if (mode === "reviewer") {
-      const restoreBtn = document.createElement("button");
-      restoreBtn.className = "pw-restore-btn";
-      restoreBtn.textContent = `Restore to @${t.name}`;
-      restoreBtn.addEventListener("click", (evt) => {
-        evt.stopPropagation();
-        model.set("restore_request", { tag: t.name });
-        model.save_changes();
-      });
-      chip.appendChild(restoreBtn);
-    }
-    tags.appendChild(chip);
-  });
-  card.appendChild(tags);
-
-  const artifacts = document.createElement("div");
-  artifacts.className = "pw-node-artifacts";
-  row.annotation.artifacts.forEach((a) => artifacts.appendChild(artifactBadge(a)));
-  card.appendChild(artifacts);
-
-  return card;
 }
 
 function renderTargetSelector(model: AnyModel): HTMLElement {
@@ -155,7 +107,9 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
   const mode = model.get("mode") as string;
-  model_commits = model.get("commits") as { stateId: string; annotation: AnnotationJson }[];
+  const rows = collectAnnotations(model, tree);
+
+  if (mode === "reviewer") renderReplayBar(container, model);
 
   const header = document.createElement("div");
   header.className = "pw-tree-header";
@@ -169,9 +123,20 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
   header.appendChild(caption);
   container.appendChild(header);
 
+  const cursor = mode === "reviewer" ? cursorStateId(model, tree) : null;
   const rail = document.createElement("div");
   rail.className = "pw-commit-rail";
-  allAnnotationsInSequence(tree).forEach((row) => rail.appendChild(renderCommitCard(row, mode, model)));
+  rows.forEach((row) =>
+    rail.appendChild(
+      annotationCard(row, {
+        mode,
+        model,
+        isCurrent: cursor !== null && row.stateId === cursor,
+        canReplay: !!tree.nodes[row.stateId],
+        onReplay: () => moveCursor(model, tree, row.stateId),
+      }),
+    ),
+  );
   container.appendChild(rail);
 
   if (mode === "student") {

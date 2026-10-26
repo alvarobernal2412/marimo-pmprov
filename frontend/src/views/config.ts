@@ -1,11 +1,10 @@
 interface AnyModel {
   get(key: string): unknown;
-  set(key: string, value: unknown): void;
-  save_changes(): void;
 }
 
-const PERSONAS = ["student", "reviewer"] as const;
-
+// The persona is chosen when the panel is created in Python
+// (ProvenancePanel(mode=...)), not switchable from the UI: it decides which
+// tools exist (annotate/edit/delete vs. replay), so readers can't escalate.
 export function renderConfig(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
 
@@ -14,26 +13,13 @@ export function renderConfig(container: HTMLElement, model: AnyModel): void {
   heading.textContent = "Persona";
   container.appendChild(heading);
 
-  const mode = model.get("mode") as string;
-  PERSONAS.forEach((persona) => {
-    const label = document.createElement("label");
-    label.className = "pw-config-radio";
+  const value = document.createElement("div");
+  value.className = "pw-config-persona";
+  value.textContent = String(model.get("mode"));
+  container.appendChild(value);
 
-    const input = document.createElement("input");
-    input.type = "radio";
-    input.name = "pw-persona";
-    input.value = persona;
-    input.checked = mode === persona;
-    input.addEventListener("change", () => {
-      model.set("mode", persona);
-      model.save_changes();
-    });
-    label.appendChild(input);
-
-    const text = document.createElement("span");
-    text.textContent = persona;
-    label.appendChild(text);
-
-    container.appendChild(label);
-  });
+  const hint = document.createElement("div");
+  hint.className = "pw-tree-caption";
+  hint.textContent = "Set when the panel was created: ProvenancePanel(mode=\"student\" | \"reviewer\").";
+  container.appendChild(hint);
 }
