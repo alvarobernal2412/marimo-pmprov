@@ -229,6 +229,9 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   });
   model.on("change:tree", renderBody);
   model.on("change:commits", renderBody);
+  model.on("change:removed_annotations", renderBody);
+  model.on("change:edited_annotations", renderBody);
+  model.on("change:replay", renderBody);
   model.on("change:restore_request", renderRestoreBanner);
 
   armGutterAffordance(model, (selection) => {

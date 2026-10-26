@@ -7,6 +7,8 @@
 // interacting with right now" without needing their own copy of it.
 export interface TreeNavState {
   _pwTreePath?: string[];
+  // reviewer replay: parent stateId -> child last stepped back from (for redo)
+  _pwForward?: Record<string, string>;
 }
 
 export function getActivePath(model: unknown): string[] | null {
