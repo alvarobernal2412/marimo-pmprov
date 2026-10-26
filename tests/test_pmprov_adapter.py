@@ -94,3 +94,34 @@ def test_persist_annotation_returns_none_for_empty_text(rt, event_log):
     _settle(rt)
     adapter = PmprovAdapter(rt)
     assert adapter.persist_annotation(rt._current_state_id, {"note": "", "title": ""}) is None
+
+
+def _traced_state(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="f", raw_line="df=f(df)",
+                  args=[event_log], kwargs={})
+    _settle(rt)
+    return rt._current_state_id
+
+
+def test_update_annotation_changes_text_and_tags_in_pmprov(rt, event_log):
+    state_id = _traced_state(rt, event_log)
+    adapter = PmprovAdapter(rt)
+    annotation_id = adapter.persist_annotation(
+        state_id, {"note": "first", "tags": [{"name": "old"}]}
+    )
+
+    adapter.update_annotation(annotation_id, {"note": "second", "tags": [{"name": "new"}]})
+
+    annotation = adapter.get_tree().nodes[state_id].annotations[0]
+    assert annotation.note == "second"
+    assert [t.name for t in annotation.tags] == ["new"]
+
+
+def test_remove_annotation_deletes_it_from_pmprov(rt, event_log):
+    state_id = _traced_state(rt, event_log)
+    adapter = PmprovAdapter(rt)
+    annotation_id = adapter.persist_annotation(state_id, {"note": "gone soon"})
+
+    adapter.remove_annotation(annotation_id)
+
+    assert adapter.get_tree().nodes[state_id].annotations == []
