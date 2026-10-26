@@ -87,3 +87,81 @@ def test_acknowledge_restore_clears_request_and_sets_ack():
     panel.acknowledge_restore()
     assert panel.widget.restore_request == {}
     assert panel.widget.restore_ack == {"acknowledged": True}
+
+
+class _EditableSource(_RecordingSource):
+    def __init__(self):
+        super().__init__()
+        self.removed: list[str] = []
+        self.updated: list[tuple[str, dict]] = []
+
+    def persist_annotation(self, state_id, annotation_dict):
+        super().persist_annotation(state_id, annotation_dict)
+        return "src-1"
+
+    def remove_annotation(self, annotation_id):
+        self.removed.append(annotation_id)
+
+    def update_annotation(self, annotation_id, annotation_dict):
+        self.updated.append((annotation_id, annotation_dict))
+
+
+def test_invalid_mode_is_rejected():
+    import pytest
+
+    with pytest.raises(ValueError):
+        ProvenancePanel(source=MockProvenanceSource(), mode="admin")
+
+
+def test_mode_cannot_be_changed_after_construction():
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    panel.widget.mode = "student"
+    assert panel.widget.mode == "reviewer"
+
+
+def test_remove_annotation_deletes_through_source_using_its_own_id():
+    source = _EditableSource()
+    panel = ProvenancePanel(source=source)
+    panel.commit_annotation({"annotationId": "ann-1", "note": "x"}, state_id="s1")
+
+    panel.remove_annotation("ann-1")
+
+    assert source.removed == ["src-1"]
+    assert panel.widget.removed_annotations == ["ann-1", "src-1"]
+
+
+def test_update_annotation_goes_through_source():
+    source = _EditableSource()
+    panel = ProvenancePanel(source=source)
+    panel.commit_annotation({"annotationId": "ann-1", "note": "x"}, state_id="s1")
+
+    panel.update_annotation("ann-1", {"annotationId": "ann-1", "note": "y"})
+
+    assert source.updated == [("src-1", {"annotationId": "ann-1", "note": "y"})]
+
+
+def test_reviewer_cannot_remove_or_edit_annotations():
+    source = _EditableSource()
+    panel = ProvenancePanel(source=source, mode="reviewer")
+
+    panel.remove_annotation("ann-1")
+    panel.update_annotation("ann-1", {"note": "y"})
+
+    assert panel.widget.removed_annotations == []
+    assert panel.widget.edited_annotations == {}
+    assert source.removed == [] and source.updated == []
+
+
+def test_latest_state_is_last_recorded_and_go_to_sets_cursor():
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    node_ids = list(panel.widget.tree["nodes"])
+    assert panel.latest_state_id == node_ids[-1]
+    assert panel.cursor_state_id is None
+
+    panel.go_to(node_ids[0])
+    assert panel.cursor_state_id == node_ids[0]
+    assert panel.widget.replay["isLatest"] is False
+
+    panel.go_latest()
+    assert panel.cursor_state_id == node_ids[-1]
+    assert panel.widget.replay["isLatest"] is True

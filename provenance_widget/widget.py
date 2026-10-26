@@ -24,13 +24,27 @@ class ProvenanceWidget(anywidget.AnyWidget):
     commits = traitlets.List([]).tag(sync=True)
     restore_request = traitlets.Dict({}).tag(sync=True)
     restore_ack = traitlets.Dict({}).tag(sync=True)
+    # Annotation ids hidden by the user, and id -> replacement annotation for
+    # edited ones. Overlays on top of tree/commits so they work uniformly for
+    # annotations that live on tree nodes and ones committed from the widget.
+    removed_annotations = traitlets.List([]).tag(sync=True)
+    edited_annotations = traitlets.Dict({}).tag(sync=True)
+    # Reviewer replay cursor: {"stateId", "params", "isLatest"} — the analysis
+    # state the reviewer has stepped to. Empty until the first step.
+    replay = traitlets.Dict({}).tag(sync=True)
 
 
 _AUTO_REFRESH_INTERVAL_SECONDS = 0.75
+_VALID_MODES = ("student", "reviewer")
 
 
 class ProvenancePanel:
-    """Python-side façade wrapping one ProvenanceWidget instance."""
+    """Python-side façade wrapping one ProvenanceWidget instance.
+
+    `mode` ("student" or "reviewer") is fixed at construction: it decides
+    which UI exists (annotation composer/edit/delete vs. read-only replay
+    stepper), so a reader of the notebook cannot switch themselves into it.
+    """
 
     def __init__(
         self,
@@ -40,6 +54,9 @@ class ProvenancePanel:
         tabs: list[str] | None = None,
     ):
         self._source = source if source is not None else EmptyProvenanceSource()
+        if mode not in _VALID_MODES:
+            raise ValueError(f"mode must be one of {_VALID_MODES}, got {mode!r}")
+        self._mode = mode
         visible_tabs = tabs if tabs is not None else ["curated", "tree", "config"]
         active_tab = visible_tabs[0] if visible_tabs else "curated"
         self.widget = ProvenanceWidget(
@@ -50,7 +67,14 @@ class ProvenancePanel:
         )
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0
+        # frontend annotation id -> id the source assigned when persisting it
+        self._source_ids: dict[str, str] = {}
+        self._handled_removals: set[str] = set()
+        self._handled_edits: dict[str, dict] = {}
         self.widget.observe(self._on_commits_changed, names="commits")
+        self.widget.observe(self._on_removed_changed, names="removed_annotations")
+        self.widget.observe(self._on_edited_changed, names="edited_annotations")
+        self.widget.observe(self._on_mode_changed, names="mode")
         # Sources like PmprovAdapter grow on their own as the notebook runs
         # (a live pmprov RuntimeTracker being traced in the background) — for
         # those, poll and push updates automatically so tracked cells don't
@@ -127,10 +151,93 @@ class ProvenancePanel:
         if not hasattr(self._source, "persist_annotation"):
             return
         for commit in new_commits:
+            annotation = commit.get("annotation") or {}
             try:
-                self._source.persist_annotation(commit.get("stateId"), commit.get("annotation") or {})
+                source_id = self._source.persist_annotation(commit.get("stateId"), annotation)
             except Exception:
-                pass  # a persistence failure shouldn't break the widget's own UI state
+                continue  # a persistence failure shouldn't break the widget's own UI state
+            if source_id and annotation.get("annotationId"):
+                self._source_ids[annotation["annotationId"]] = source_id
+
+    def _on_mode_changed(self, change: dict) -> None:
+        # The persona is fixed at construction; undo any frontend attempt to change it.
+        if change["new"] != self._mode:
+            self.widget.mode = self._mode
+
+    def _on_removed_changed(self, change: dict) -> None:
+        removed = change["new"] or []
+        if self._mode == "reviewer":  # read-only persona: always empty
+            if removed:
+                self.widget.removed_annotations = []
+            return
+        for annotation_id in removed:
+            if annotation_id in self._handled_removals:
+                continue
+            self._handled_removals.add(annotation_id)
+            source_id = self._source_ids.get(annotation_id, annotation_id)
+            if hasattr(self._source, "remove_annotation"):
+                try:
+                    self._source.remove_annotation(source_id)
+                except Exception:
+                    pass
+            if source_id != annotation_id and source_id not in removed:
+                # the source's own copy of it shows up in the tree under its id
+                self._handled_removals.add(source_id)
+                self.widget.removed_annotations = [*removed, source_id]
+
+    def _on_edited_changed(self, change: dict) -> None:
+        edited = change["new"] or {}
+        if self._mode == "reviewer":
+            if edited:
+                self.widget.edited_annotations = {}
+            return
+        for annotation_id, annotation in edited.items():
+            if self._handled_edits.get(annotation_id) == annotation:
+                continue
+            self._handled_edits[annotation_id] = annotation
+            if hasattr(self._source, "update_annotation"):
+                try:
+                    self._source.update_annotation(
+                        self._source_ids.get(annotation_id, annotation_id), annotation
+                    )
+                except Exception:
+                    pass
+
+    def remove_annotation(self, annotation_id: str) -> None:
+        """Remove an annotation (hides it in the UI and deletes it in the source)."""
+        if annotation_id not in self.widget.removed_annotations:
+            self.widget.removed_annotations = [*self.widget.removed_annotations, annotation_id]
+
+    def update_annotation(self, annotation_id: str, annotation_dict: dict) -> None:
+        """Replace an annotation's content (title/note/tags) everywhere it shows."""
+        self.widget.edited_annotations = {**self.widget.edited_annotations, annotation_id: annotation_dict}
+
+    @property
+    def latest_state_id(self) -> str | None:
+        """The most recently recorded analysis state (last node in time order)."""
+        nodes = self.widget.tree.get("nodes") or {}
+        return next(reversed(nodes), None) if nodes else None
+
+    @property
+    def cursor_state_id(self) -> str | None:
+        """The state the reviewer has stepped to, or None before any replay."""
+        return self.widget.replay.get("stateId")
+
+    def go_to(self, state_id: str) -> None:
+        """Move the replay cursor to a state (what the sidebar's stepper does)."""
+        node = (self.widget.tree.get("nodes") or {}).get(state_id)
+        if node is None:
+            raise KeyError(state_id)
+        self.widget.replay = {
+            "stateId": state_id,
+            "params": node["params"],
+            "isLatest": state_id == self.latest_state_id,
+        }
+
+    def go_latest(self) -> None:
+        latest = self.latest_state_id
+        if latest is not None:
+            self.go_to(latest)
 
     def commit_annotation(self, annotation_dict: dict, state_id: str | None = None) -> None:
         """Record an annotation, associating it with an analysis state.
