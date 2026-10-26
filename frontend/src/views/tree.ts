@@ -1,7 +1,10 @@
-import type { AnnotationJson, ProvenanceNodeJson, ProvenanceTreeJson } from "../types";
+import type { ProvenanceNodeJson, ProvenanceTreeJson } from "../types";
 import { nodeCard } from "../components/node-card";
 import { renderInspect } from "./inspect";
 import type { TreeNavState } from "../nav-state";
+import { collectAnnotations } from "../annotations";
+import { moveCursor } from "../replay";
+import { renderReplayBar } from "./replay-bar";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -48,21 +51,9 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
 
-  // Sources like PmprovAdapter never populate node.annotations themselves
-  // (pmprov has no annotation concept of its own) — annotations only exist
-  // on the widget's "commits" list, keyed by whichever state_id they were
-  // resolved to (see ProvenancePanel.commit_annotation /
-  // state_for_artifact). Merge them in here so a node's card reflects every
-  // annotation actually associated with it, regardless of which mechanism
-  // produced it.
-  const commits = (model.get("commits") as { stateId: string; annotation: AnnotationJson }[]) ?? [];
-  for (const { stateId, annotation } of commits) {
-    const node = tree.nodes[stateId];
-    if (!node) continue;
-    if (!node.annotations.some((a) => a.annotationId === annotation.annotationId)) {
-      node.annotations = [...node.annotations, annotation];
-    }
-  }
+  // Merge widget commits into the nodes, minus removed annotations and with
+  // edits applied, so every card reflects the annotations actually in effect.
+  collectAnnotations(model, tree);
 
   const header = document.createElement("div");
   header.className = "pw-tree-header";
@@ -76,6 +67,9 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
     "Click a card to drill into its branch and inspect it. Use the filters below to spotlight matching steps — the rest collapse to a single line.";
   header.appendChild(caption);
   container.appendChild(header);
+
+  const reviewer = model.get("mode") === "reviewer";
+  if (reviewer) renderReplayBar(container, model);
 
   const activeTags = new Set<string>();
   let activeArtifact: string | null = null;
@@ -293,6 +287,10 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
           collapsed,
           selected: node.stateId === pickedStateId,
           onSelect: () => {
+            if (reviewer) {
+              moveCursor(model, tree, node.stateId);
+              return;
+            }
             path.splice(depth, path.length, node.stateId);
             const current = (model.get("selection") as Record<string, unknown>) ?? {};
             model.set("selection", { ...current, node: { pickedStateId: node.stateId } });
