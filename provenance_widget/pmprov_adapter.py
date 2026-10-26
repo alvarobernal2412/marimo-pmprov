@@ -65,6 +65,9 @@ class PmprovAdapter:
 
     def __init__(self, tracker: Any) -> None:
         self._rt = tracker
+        # annotation_id -> (state_id, tag names) for annotations persisted
+        # through this adapter, so update_annotation() can diff tags.
+        self._persisted_tags: dict[str, tuple[str, set[str]]] = {}
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -245,8 +248,40 @@ class PmprovAdapter:
         from models.annotations import AnnotatableType
 
         annotation_id = self._rt.annotate([(AnnotatableType.ANALYSIS_STATE, state_id)], text)
-        for tag in annotation_dict.get("tags") or []:
-            name = tag.get("name") if isinstance(tag, dict) else None
-            if name:
-                self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
+        names = self._tag_names(annotation_dict)
+        for name in names:
+            self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
+        self._persisted_tags[annotation_id] = (state_id, names)
         return annotation_id
+
+    @staticmethod
+    def _tag_names(annotation_dict: dict) -> set[str]:
+        return {
+            tag["name"]
+            for tag in annotation_dict.get("tags") or []
+            if isinstance(tag, dict) and tag.get("name")
+        }
+
+    def remove_annotation(self, annotation_id: str) -> None:
+        """Delete a previously persisted annotation from pmprov."""
+        self._rt.remove_annotation(annotation_id)
+        self._persisted_tags.pop(annotation_id, None)
+
+    def update_annotation(self, annotation_id: str, annotation_dict: dict) -> None:
+        """Replace an annotation's text and sync its tags in pmprov."""
+        text = annotation_dict.get("note") or annotation_dict.get("title") or ""
+        if not text:
+            return
+
+        from models.annotations import AnnotatableType
+
+        self._rt.update_annotation(annotation_id, text)
+        state_id, old_names = self._persisted_tags.get(annotation_id, (None, set()))
+        if state_id is None:
+            return
+        new_names = self._tag_names(annotation_dict)
+        for name in new_names - old_names:
+            self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
+        for name in old_names - new_names:
+            self._rt.untag(AnnotatableType.ANALYSIS_STATE, state_id, name)
+        self._persisted_tags[annotation_id] = (state_id, new_names)
