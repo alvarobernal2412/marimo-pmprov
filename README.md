@@ -93,10 +93,12 @@ mo.callout(mo.md(snap.banner()))               # "Snapshot of the analysis after
 
 Values load lazily, one variable at a time, from pmprov's recorded state
 (`restore_state(names=...)`, cached per artifact version). Treat them as
-read-only. This needs **pmprov >= 0.9.0**. 0.8.0 works for most notebooks but
-misses plain aliases (`df = other`) and objects changed through another
-variable (`ax.bar(...)` changing `fig`); with a pmprov older than 0.8.0 the
-snapshot reports why it is unavailable instead of showing wrong data.
+read-only. It works with any pmprov. **pmprov >= 0.9.0 is recommended**: 0.8+
+records exactly which variable was bound to which artifact at every state, and
+0.9 also tracks plain aliases (`df = other`) and objects changed through another
+variable (`ax.bar(...)` changing `fig`). With an older pmprov, or for histories
+recorded before 0.8, each variable is rebuilt from the step that last assigned
+it: exact for what pmprov tracked, but slower and blind to those two cases.
 
 Keep computing and displaying in separate cells: a display cell that also
 computed would re-run, and re-record a step, every time the reviewer steps.

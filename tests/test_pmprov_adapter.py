@@ -182,6 +182,31 @@ def test_snapshot_of_a_history_recorded_without_bindings_is_still_exact(rt, even
     assert len(adapter.snapshot(second_state, names=["small"])["small"]) == 1
 
 
+def test_snapshot_works_on_a_pmprov_that_has_neither_bindings_nor_selective_restore(rt, event_log, monkeypatch):
+    """Simulates pmprov < 0.8: no load_state_bindings, restore_state() without `names`."""
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
+                  args=[event_log], kwargs={})
+    first_state = rt._current_state_id
+    rt.trace_step(func=lambda df: df.head(1), func_name="first_row", raw_line="small = first_row(with_x)",
+                  args=[event_log.assign(x=1)], kwargs={})
+    second_state = rt._current_state_id
+    _settle(rt)
+    real_restore = rt.restore_state
+
+    def old_restore(state_id, **kwargs):
+        if "names" in kwargs:
+            raise TypeError("restore_state() got an unexpected keyword argument 'names'")
+        return real_restore(state_id)
+
+    monkeypatch.setattr(rt, "restore_state", old_restore)
+    adapter = PmprovAdapter(rt)
+    monkeypatch.setattr(adapter, "_bindings", lambda state_id: {})  # no bindings recorded
+
+    assert adapter.snapshot_bindings(second_state) == {"with_x", "small"}
+    assert len(adapter.snapshot(first_state)["with_x"]) == 2
+    assert len(adapter.snapshot(second_state, names=["small"])["small"]) == 1
+
+
 def test_readable_params_drops_artifact_refs_and_function_prefix():
     raw = [
         {"param_id": "f:event_log", "value": {"value_type": "artifact_state_ref", "artifact_state_id": "x"}},
