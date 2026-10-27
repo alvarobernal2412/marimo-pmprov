@@ -20,6 +20,8 @@ class ProvenanceWidget(anywidget.AnyWidget):
     mode = traitlets.Unicode("student").tag(sync=True)
     active_tab = traitlets.Unicode("curated").tag(sync=True)
     visible_tabs = traitlets.List(["curated", "tree", "config"]).tag(sync=True)
+    # The Tree tab is opt-in: hidden unless enabled here or via the Config tab.
+    show_tree = traitlets.Bool(False).tag(sync=True)
     selection = traitlets.Dict({}).tag(sync=True)
     commits = traitlets.List([]).tag(sync=True)
     restore_request = traitlets.Dict({}).tag(sync=True)
@@ -44,6 +46,8 @@ class ProvenancePanel:
     `mode` ("student" or "reviewer") is fixed at construction: it decides
     which UI exists (annotation composer/edit/delete vs. read-only replay
     stepper), so a reader of the notebook cannot switch themselves into it.
+    The Tree tab is hidden unless `show_tree=True` (or `tabs` includes
+    "tree"); readers can also toggle it from the Config tab.
     """
 
     def __init__(
@@ -52,11 +56,16 @@ class ProvenancePanel:
         mode: str = "student",
         auto_refresh: bool = True,
         tabs: list[str] | None = None,
+        show_tree: bool | None = None,
     ):
         self._source = source if source is not None else EmptyProvenanceSource()
         if mode not in _VALID_MODES:
             raise ValueError(f"mode must be one of {_VALID_MODES}, got {mode!r}")
         self._mode = mode
+        # Hidden by default. An explicit `tabs` that names "tree" counts as
+        # opting in; otherwise the Config tab's checkbox turns it on.
+        if show_tree is None:
+            show_tree = tabs is not None and "tree" in tabs
         visible_tabs = tabs if tabs is not None else ["curated", "tree", "config"]
         active_tab = visible_tabs[0] if visible_tabs else "curated"
         self.widget = ProvenanceWidget(
@@ -64,6 +73,7 @@ class ProvenancePanel:
             mode=mode,
             visible_tabs=visible_tabs,
             active_tab=active_tab,
+            show_tree=show_tree,
         )
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0

@@ -165,3 +165,16 @@ def test_latest_state_is_last_recorded_and_go_to_sets_cursor():
     panel.go_latest()
     assert panel.cursor_state_id == node_ids[-1]
     assert panel.widget.replay["isLatest"] is True
+
+
+def test_tree_tab_is_hidden_by_default():
+    assert ProvenancePanel(source=MockProvenanceSource()).widget.show_tree is False
+
+
+def test_show_tree_can_be_enabled_at_construction():
+    assert ProvenancePanel(source=MockProvenanceSource(), show_tree=True).widget.show_tree is True
+
+
+def test_explicit_tabs_including_tree_opt_in():
+    panel = ProvenancePanel(source=MockProvenanceSource(), tabs=["curated", "tree"])
+    assert panel.widget.show_tree is True
