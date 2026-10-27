@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import pathlib
+import re
 import threading
 import warnings
 
@@ -39,6 +41,11 @@ class ProvenanceWidget(anywidget.AnyWidget):
     # Reviewer replay cursor: {"stateId", "params", "isLatest"} — the analysis
     # state the reviewer has stepped to. Empty until the first step.
     replay = traitlets.Dict({}).tag(sync=True)
+    # "Export PDF": the sidebar sets export_request ({"requestId": ...}); the
+    # panel answers in export_result ({"requestId", "filename", "data" (base64)}
+    # or {"requestId", "error"}).
+    export_request = traitlets.Dict({}).tag(sync=True)
+    export_result = traitlets.Dict({}).tag(sync=True)
 
 
 _AUTO_REFRESH_INTERVAL_SECONDS = 0.75
@@ -62,6 +69,7 @@ class ProvenancePanel:
         auto_refresh: bool = True,
         tabs: list[str] | None = None,
         show_tree: bool | None = None,
+        report_title: str = "Annotated analysis report",
     ):
         self._source = source if source is not None else EmptyProvenanceSource()
         if mode == "student":  # the analyst persona's former name
@@ -72,6 +80,7 @@ class ProvenancePanel:
         if mode not in _VALID_MODES:
             raise ValueError(f"mode must be one of {_VALID_MODES}, got {mode!r}")
         self._mode = mode
+        self._report_title = report_title
         # Hidden by default. An explicit `tabs` that names "tree" counts as
         # opting in.
         if show_tree is None:
@@ -98,6 +107,7 @@ class ProvenancePanel:
         self.widget.observe(self._on_edited_changed, names="edited_annotations")
         self.widget.observe(self._on_mode_changed, names="mode")
         self.widget.observe(self._on_show_tree_changed, names="show_tree")
+        self.widget.observe(self._on_export_requested, names="export_request")
         # Sources like PmprovAdapter grow on their own as the notebook runs
         # (a live pmprov RuntimeTracker being traced in the background) — for
         # those, poll and push updates automatically so tracked cells don't
@@ -234,6 +244,84 @@ class ProvenancePanel:
                     )
                 except Exception:
                     pass
+
+    def _on_export_requested(self, change: dict) -> None:
+        request = change["new"] or {}
+        if not request.get("requestId") or self._mode != "analyst":
+            return
+        result: dict = {"requestId": request["requestId"]}
+        try:
+            data = self.export_pdf()
+            result["filename"] = re.sub(r"[^\w.-]+", "_", self._report_title).strip("_").lower() + ".pdf"
+            result["data"] = base64.b64encode(data).decode("ascii")
+        except Exception as exc:
+            result["error"] = str(exc) or type(exc).__name__
+        self.widget.export_result = result
+
+    def export_pdf(self, path: str | pathlib.Path | None = None, title: str | None = None) -> bytes:
+        """The annotation history as an academic-style PDF (needs the ``pdf`` extra).
+
+        Annotations come in time order, each with its tags, the step number and
+        the output it targets, drawn as the analysis showed it at that step
+        (tables, figures). Returns the PDF bytes, and writes them to *path* if given.
+        """
+        from provenance_widget.export_pdf import build_pdf, collect_rows
+
+        widget = self.widget
+        rows = collect_rows(
+            widget.tree,
+            list(widget.commits),
+            list(widget.removed_annotations),
+            dict(widget.edited_annotations),
+            dict(widget.annotation_aliases),
+        )
+        self._name_targets(rows)
+        data = build_pdf(
+            rows,
+            self._artifact_value,
+            title=title or self._report_title,
+            stores_outputs=hasattr(self._source, "snapshot"),
+        )
+        if path is not None:
+            pathlib.Path(path).write_bytes(data)
+        return data
+
+    def _name_targets(self, rows) -> None:
+        """Targets a source stored without a name (only the state id) get their variable's name."""
+        source = self._source
+        if not hasattr(source, "variable_for_artifact"):
+            return
+        for row in rows:
+            refs = []
+            for ref in row.annotation.get("artifacts") or []:
+                if ref.get("artifactName") in (None, "", ref.get("artifactId")):
+                    try:
+                        name = source.variable_for_artifact(row.state_id, ref.get("artifactId", ""))
+                    except Exception:
+                        name = None
+                    ref = {**ref, "artifactName": name or ref.get("artifactName")}
+                refs.append(ref)
+            if refs:
+                row.annotation = {**row.annotation, "artifacts": refs}
+
+    def _artifact_value(self, row, ref: dict):
+        """What an annotation's target held at its state, or None if it cannot be recovered."""
+        source = self._source
+        if not hasattr(source, "snapshot") or row.state_id not in (self.widget.tree.get("nodes") or {}):
+            return None
+        bound = source.snapshot_bindings(row.state_id) if hasattr(source, "snapshot_bindings") else set()
+        name = None
+        if hasattr(source, "variable_for_artifact"):
+            name = source.variable_for_artifact(row.state_id, ref.get("artifactId", ""))
+        for candidate in (ref.get("artifactName"), (ref.get("artifactName") or "").rsplit(".", 1)[0]):
+            if name is None and candidate in bound:
+                name = candidate
+        if name is None:
+            return None
+        try:
+            return source.snapshot(row.state_id, [name]).get(name)
+        except Exception:
+            return None
 
     def remove_annotation(self, annotation_id: str) -> None:
         """Remove an annotation (hides it in the UI and deletes it in the source)."""

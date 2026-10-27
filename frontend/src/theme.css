@@ -246,6 +246,11 @@ body.pw-picking-active * { cursor: crosshair !important; }
 .pw-list-count { font-size: 11px; background: #E2E8F0; color: #475569; border-radius: 999px; padding: 0 7px; }
 @media (prefers-color-scheme: dark) { .pw-list-count { background: #334155; color: #CBD5E1; } }
 .pw-list-order { margin-left: auto; font-size: 11px; color: #94A3B8; }
+.pw-export-btn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #94A3B8; background: transparent; color: inherit; border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.pw-export-btn:hover:not(:disabled) { border-color: #0EA5E9; color: #0EA5E9; }
+.pw-export-btn:focus-visible { outline: 2px solid #0EA5E9; outline-offset: 1px; }
+.pw-export-btn:disabled { opacity: 0.5; cursor: default; }
+.pw-export-error { font-size: 11px; color: #DC2626; margin: 0 0 6px; }
 .pw-ann {
   border-left: 3px solid #CBD5E1; border-radius: 6px; margin-bottom: 2px;
 }

@@ -11,6 +11,8 @@ export interface TreeNavState {
   _pwForward?: Record<string, string>;
   // annotation composer draft, so a re-render never loses what is being typed
   _pwDraft?: { note: string; tags: string };
+  // PDF export: the pending request id, or the last error
+  _pwExport?: { pending?: string; error?: string };
 }
 
 export function getActivePath(model: unknown): string[] | null {

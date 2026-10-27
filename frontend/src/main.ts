@@ -1,6 +1,7 @@
 import "./theme.css";
 import { segmentedControl } from "./components/segmented-control";
 import { renderCurated } from "./views/curated";
+import { handleExportResult } from "./export";
 import { renderTree } from "./views/tree";
 import { armPicker } from "./picker";
 import { armGutterAffordance } from "./gutter";
@@ -249,6 +250,10 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     if (model.get("active_tab") === "curated") renderBody();
   });
   model.on("change:restore_request", renderRestoreBanner);
+  model.on("change:export_result", () => {
+    handleExportResult(model);
+    renderBody();
+  });
 
   armGutterAffordance(model, (selection) => {
     if (model.get("active_tab") !== "curated" && getVisibleTabs().includes("curated")) {

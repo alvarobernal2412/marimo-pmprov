@@ -189,6 +189,29 @@ class PmprovAdapter:
             return artifact_id
         return None
 
+    def variable_for_artifact(self, state_id: str, artifact_id: str) -> str | None:
+        """Name of the variable that holds *artifact_id* at *state_id*, else None.
+
+        An annotation's target is the id of the state that produced the output,
+        which is not the artifact version pmprov binds the variable to (pmprov
+        >= 0.8), so the variable is found from the step that created the state.
+        """
+        self.settle()
+        bindings = self._bindings(state_id) or self._legacy_sources(state_id)
+        for name, version in bindings.items():  # the id may already be the bound version
+            if version == artifact_id:
+                return name
+        graph = self._rt.storage.load_graph(self._rt._history.history_id)
+        step = next((s for s in graph["steps"] if s["output_state_id"] == artifact_id), None)
+        if step is None:
+            return None
+        name = self._assigned_name(step.get("raw_line"))
+        if name in bindings:
+            return name
+        before = self._bindings(step["input_state_id"])  # the one variable the step added or changed
+        changed = [n for n, v in bindings.items() if before.get(n) != v]
+        return changed[0] if len(changed) == 1 else None
+
     def latest_state_id(self, func_name: str | None = None) -> str | None:
         """Return the output_state_id of the most recent step.
 
