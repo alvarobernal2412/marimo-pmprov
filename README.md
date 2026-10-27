@@ -6,12 +6,19 @@ commit rail, a Miller-columns provenance tree with tag/artifact filters and
 an inline inspector, and a read-only Reviewer mode with tag-based state
 restore.
 
-This package ships fully decoupled from the `pmprov` library — it runs out
-of the box against a `MockProvenanceSource` whose data is shaped exactly
-like pmprov's real model (see `provenance_widget/interfaces.py`), so no
-`pmprov` install is required to try it or to develop against it.
+The widget is decoupled from the `pmprov` library: it runs out of the box
+against a `MockProvenanceSource` shaped like pmprov's real model (see
+`provenance_widget/interfaces.py`), so `pmprov` is only needed to record and
+replay real analyses (`pip install "marimo-pmprov[pmprov]"`).
 
 ## Install
+
+```bash
+pip install marimo-pmprov
+pip install "marimo-pmprov[pmprov]"   # adds pmprov >= 0.9 (Python 3.13+) for real recording and replay
+```
+
+Latest development version:
 
 ```bash
 pip install "marimo-pmprov @ git+https://github.com/alvarobernal2412/marimo-pmprov.git"
@@ -157,6 +164,23 @@ bar_chart
 
 See `examples/demo_notebook.py` for all five wired up against the same
 dataset.
+
+## Export the annotations as a PDF
+
+In analyst mode the Annotations list has an **Export PDF** button. It saves a
+report (title, summary, numbered entries, captioned tables and figures, set in
+Source Sans) with the annotations in the order they were written. Each
+entry has the note, its tags, the step number and operation, the settings in
+force, and the output it targets, drawn as the analysis showed it at that step:
+a table for a DataFrame, an image for a matplotlib, Altair or Plotly figure
+(Plotly needs `kaleido`). Outputs are read from pmprov's recorded state, so
+they are the values at that step, not the current ones.
+
+```bash
+pip install "marimo-pmprov[pdf]"
+```
+
+From Python: `panel.export_pdf("report.pdf")`.
 
 ## Connecting a real pmprov-backed history
 
