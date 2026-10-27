@@ -2,7 +2,6 @@ import "./theme.css";
 import { segmentedControl } from "./components/segmented-control";
 import { renderCurated } from "./views/curated";
 import { renderTree } from "./views/tree";
-import { renderConfig } from "./views/config";
 import { armPicker } from "./picker";
 import { armGutterAffordance } from "./gutter";
 import { icon } from "./components/icons";
@@ -90,7 +89,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
 
   function getVisibleTabs(): string[] {
     const visible = model.get("visible_tabs") as string[] | undefined;
-    const tabs = visible && visible.length > 0 ? visible : ["curated", "tree", "config"];
+    const tabs = visible && visible.length > 0 ? visible : ["curated", "tree"];
     return model.get("show_tree") ? tabs : tabs.filter((tab) => tab !== "tree");
   }
 
@@ -105,8 +104,9 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
       // curated/edited view.
       { value: "curated", label: "Annotations" },
       { value: "tree", label: "Tree" },
-      { value: "config", label: "Config" },
     ].filter((option) => visibleTabs.includes(option.value));
+    // A lone Annotations tab needs no switcher.
+    if (options.length < 2) return;
     tabs.appendChild(
       segmentedControl(options, activeTab, (value) => {
         model.set("active_tab", value);
@@ -208,11 +208,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
 
     const view = document.createElement("div");
     body.appendChild(view);
-    if (activeTab === "config") {
-      renderConfig(view, model);
-      return;
-    }
-    renderCurated(view, model, model.get("mode") === "student" ? pickBtn : undefined);
+    renderCurated(view, model, model.get("mode") === "analyst" ? pickBtn : undefined);
   }
 
   window.addEventListener("resize", () => {
@@ -244,11 +240,13 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   });
   model.on("change:commits", renderBody);
   model.on("change:removed_annotations", renderBody);
+  model.on("change:annotation_aliases", renderBody);
   model.on("change:edited_annotations", renderBody);
   model.on("change:replay", renderBody);
-  model.on("change:show_tree", () => {
-    renderTabs();
-    renderBody();
+  // The composer's target line reflects the selection (e.g. when it is cleared);
+  // the tree tab updates its own selection state in place, so leave it alone.
+  model.on("change:selection", () => {
+    if (model.get("active_tab") === "curated") renderBody();
   });
   model.on("change:restore_request", renderRestoreBanner);
 

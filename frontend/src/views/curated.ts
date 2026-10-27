@@ -2,7 +2,8 @@ import type { AnnotationJson, ProvenanceTreeJson } from "../types";
 import { GRANULARITY_LABEL } from "../components/artifact-badge";
 import { annotationCard } from "../components/annotation-card";
 import { collectAnnotations } from "../annotations";
-import { cursorStateId, moveCursor } from "../replay";
+import { cursorStateId, latestStateId, moveCursor } from "../replay";
+import { icon } from "../components/icons";
 import { renderReplayBar } from "./replay-bar";
 import type { TreeNavState } from "../nav-state";
 
@@ -19,9 +20,25 @@ function renderTargetSelector(model: AnyModel): HTMLElement {
   const selection = (model.get("selection") as { artifact?: Record<string, unknown> })?.artifact ?? {};
   const artifactId = selection.artifactId ? String(selection.artifactId) : null;
 
+  const label = document.createElement("div");
+  label.className = "pw-target-selector-label";
+  label.textContent = "Target";
+  target.appendChild(label);
+
+  const value = document.createElement("div");
+  value.className = "pw-target-selector-value";
+  target.appendChild(value);
+
   if (!artifactId) {
-    target.classList.add("pw-target-selector-empty");
-    target.textContent = "No target yet. Pick an output, or hover one and press +.";
+    // No pick = the annotation is about the analysis as a whole, attached to
+    // the latest state: an immutable snapshot of the analysis right now.
+    const tree = model.get("tree") as ProvenanceTreeJson;
+    const latest = latestStateId(tree);
+    value.textContent = "Whole analysis";
+    value.classList.add("pw-target-whole");
+    value.title = latest
+      ? `Not tied to an output: linked to the latest analysis state (after "${tree.nodes[latest].operation.name}")`
+      : "Not tied to an output";
     return target;
   }
 
@@ -30,20 +47,30 @@ function renderTargetSelector(model: AnyModel): HTMLElement {
   const detail = selection.detail ? String(selection.detail) : null;
   const granularityLabel = GRANULARITY_LABEL[granularity] ?? granularity;
 
-  const label = document.createElement("div");
-  label.className = "pw-target-selector-label";
-  label.textContent = "Target";
-  target.appendChild(label);
-
-  const value = document.createElement("div");
-  value.className = "pw-target-selector-value";
   value.textContent = detail
     ? `${artifactName} · ${granularityLabel}: ${detail}`
     : `${artifactName} · ${granularityLabel}`;
   value.title = `artifact id: ${artifactId}`;
-  target.appendChild(value);
 
   return target;
+}
+
+// × next to the Pick button: drop the picked output and annotate the whole analysis.
+function renderClearButton(model: AnyModel): HTMLElement | null {
+  const selection = (model.get("selection") as { artifact?: Record<string, unknown> })?.artifact ?? {};
+  if (!selection.artifactId) return null;
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "pw-target-clear";
+  clear.setAttribute("aria-label", "Clear target (annotate the whole analysis)");
+  clear.title = "Clear target: annotate the whole analysis";
+  clear.appendChild(icon("x"));
+  clear.addEventListener("click", () => {
+    const { artifact: _dropped, ...rest } = (model.get("selection") as Record<string, unknown>) ?? {};
+    model.set("selection", rest);
+    model.save_changes();
+  });
+  return clear;
 }
 
 function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement {
@@ -54,7 +81,12 @@ function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement 
   const targetRow = document.createElement("div");
   targetRow.className = "pw-target-row";
   targetRow.appendChild(renderTargetSelector(model));
-  if (pickButton) targetRow.appendChild(pickButton);
+  const actionGroup = document.createElement("div");
+  actionGroup.className = "pw-target-actions";
+  if (pickButton) actionGroup.appendChild(pickButton);
+  const clearButton = renderClearButton(model);
+  if (clearButton) actionGroup.appendChild(clearButton);
+  targetRow.appendChild(actionGroup);
   composer.appendChild(targetRow);
 
   const nav = model as unknown as TreeNavState;
@@ -101,7 +133,7 @@ function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement 
             detail: (selection.detail as string) ?? null,
           }]
         : [],
-      author: { agent_id: "agent-student", agent_type: "human", display_name: "S" },
+      author: { agent_id: "agent-analyst", agent_type: "human", display_name: "A" },
       timestamp: new Date().toISOString(),
     };
     // Resolve which analysis state this annotation belongs to from the
@@ -111,7 +143,8 @@ function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement 
     // if it matches a node in the tree, that node produced this artifact.
     const tree = model.get("tree") as ProvenanceTreeJson;
     const targetArtifactId = newAnnotation.artifacts[0]?.artifactId;
-    const stateId = targetArtifactId && tree.nodes[targetArtifactId] ? targetArtifactId : "composer";
+    const stateId =
+      targetArtifactId && tree.nodes[targetArtifactId] ? targetArtifactId : (latestStateId(tree) ?? "composer");
 
     // Clear the draft first: setting "commits" re-renders the sidebar
     // synchronously, and the fresh composer would otherwise reload the old text.
@@ -147,7 +180,7 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
 
   if (mode === "reviewer") renderReplayBar(container, model);
 
-  if (mode === "student") {
+  if (mode === "analyst") {
     container.appendChild(renderComposer(model, pickButton));
     if (focusedField) {
       const field = container.querySelector<HTMLTextAreaElement | HTMLInputElement>(
@@ -180,7 +213,7 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
   if (rows.length === 0) {
     const empty = document.createElement("div");
     empty.className = "pw-node-no-annotations";
-    empty.textContent = mode === "student" ? "None yet. Add the first one above." : "No annotations in this analysis.";
+    empty.textContent = mode === "analyst" ? "None yet. Add the first one above." : "No annotations in this analysis.";
     rail.appendChild(empty);
   }
   rows.forEach((row) =>

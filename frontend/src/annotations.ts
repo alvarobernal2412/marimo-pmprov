@@ -18,6 +18,9 @@ export function collectAnnotations(model: AnyModel, tree: ProvenanceTreeJson): A
   const removed = new Set((model.get("removed_annotations") as string[]) ?? []);
   const edited = (model.get("edited_annotations") as Record<string, AnnotationJson>) ?? {};
   const commits = (model.get("commits") as AnnotationRow[]) ?? [];
+  // The source's stored copy of a committed annotation also shows up on its
+  // node; show the commit's own version only.
+  const storedCopies = new Set(Object.values((model.get("annotation_aliases") as Record<string, string>) ?? {}));
 
   const seen = new Set<string>();
   const rows: AnnotationRow[] = [];
@@ -34,10 +37,12 @@ export function collectAnnotations(model: AnyModel, tree: ProvenanceTreeJson): A
     }
   };
 
-  for (const node of Object.values(tree.nodes)) {
-    for (const annotation of node.annotations) add(node.stateId, annotation);
-  }
   for (const { stateId, annotation } of commits) add(stateId, annotation);
+  for (const node of Object.values(tree.nodes)) {
+    for (const annotation of node.annotations) {
+      if (!storedCopies.has(annotation.annotationId)) add(node.stateId, annotation);
+    }
+  }
 
   for (const node of Object.values(tree.nodes)) node.annotations = perNode.get(node.stateId) ?? [];
 

@@ -1,9 +1,9 @@
 import type { ProvenanceNodeJson, ProvenanceTreeJson } from "../types";
-import { nodeCard } from "../components/node-card";
+import { compactNodeCard, nodeCard } from "../components/node-card";
 import { renderInspect } from "./inspect";
 import type { TreeNavState } from "../nav-state";
 import { collectAnnotations } from "../annotations";
-import { moveCursor } from "../replay";
+import { cursorStateId, moveCursor, pathTo } from "../replay";
 import { renderReplayBar } from "./replay-bar";
 
 interface AnyModel {
@@ -59,16 +59,22 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   header.className = "pw-tree-header";
   const title = document.createElement("div");
   title.className = "pw-tree-title";
-  title.textContent = "Provenance Tree";
+  const reviewer = model.get("mode") === "reviewer";
+  title.textContent = reviewer ? "Provenance tree" : "Provenance Tree";
   header.appendChild(title);
   const caption = document.createElement("div");
   caption.className = "pw-tree-caption";
-  caption.textContent =
-    "Click a card to drill into its branch and inspect it. Use the filters below to spotlight matching steps — the rest collapse to a single line.";
+  if (reviewer) {
+    const stepCount = Object.keys(tree.nodes).length;
+    const branchCount = Object.keys(tree.branches).length;
+    caption.textContent = `${stepCount} steps · ${branchCount} branch${branchCount === 1 ? "" : "es"}. Click a step to jump to it.`;
+  } else {
+    caption.textContent =
+      "Click a card to drill into its branch and inspect it. Use the filters below to spotlight matching steps — the rest collapse to a single line.";
+  }
   header.appendChild(caption);
   container.appendChild(header);
 
-  const reviewer = model.get("mode") === "reviewer";
   if (reviewer) renderReplayBar(container, model);
 
   const activeTags = new Set<string>();
@@ -100,6 +106,8 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
 
   const columnsScroll = document.createElement("div");
   columnsScroll.className = "pw-columns-scroll";
+  // reviewer: size to the tree so the inspector sits right below it
+  if (reviewer) columnsScroll.classList.add("pw-columns-scroll-fit");
   container.appendChild(columnsScroll);
 
   const columnsWrap = document.createElement("div");
@@ -111,6 +119,7 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   const inspectPaneLabel = document.createElement("div");
   inspectPaneLabel.className = "pw-tree-inspect-pane-label";
   inspectPaneLabel.textContent = "Inspect";
+  inspectPaneLabel.hidden = reviewer; // the step's own title heads the inspector
   inspectPane.appendChild(inspectPaneLabel);
   const inspectPaneBody = document.createElement("div");
   inspectPane.appendChild(inspectPaneBody);
@@ -123,7 +132,12 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   // just extended it. The curated view reads the same stashed path to know
   // which branch is "active" — see views/curated.ts.
   const navState = model as unknown as TreeNavState;
-  if (!navState._pwTreePath || navState._pwTreePath[0] !== tree.rootId) {
+  const cursorId = reviewer ? cursorStateId(model, tree) : null;
+  if (reviewer && cursorId) {
+    // the replay cursor decides which branch is open, so the tree always
+    // reflects where the stepper is
+    navState._pwTreePath = pathTo(tree, cursorId);
+  } else if (!navState._pwTreePath || navState._pwTreePath[0] !== tree.rootId) {
     // tree.rootId may not resolve to a real node — sources with no captured
     // history yet (nodes: {}) report a root_id anyway per the ProvenanceTree
     // contract. Start the drill-down path empty rather than seeding it with
@@ -143,6 +157,11 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   }
 
   function renderInspectPane(): void {
+    if (reviewer) {
+      inspectPaneBody.classList.remove("pw-tree-inspect-pane-empty");
+      renderInspect(inspectPaneBody, model, cursorId);
+      return;
+    }
     const selection = (model.get("selection") as { node?: { pickedStateId?: string } }) ?? {};
     if (selection.node?.pickedStateId === undefined) {
       inspectPaneBody.classList.add("pw-tree-inspect-pane-empty");
@@ -205,9 +224,14 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
     breadcrumb.innerHTML = "";
     path.forEach((stateId, i) => {
       const node = tree.nodes[stateId];
-      const crumb = document.createElement("span");
+      const crumb = document.createElement(reviewer ? "button" : "span");
       crumb.className = "pw-breadcrumb-item";
       crumb.textContent = node.operation.name;
+      if (reviewer) {
+        crumb.classList.add("pw-breadcrumb-link");
+        if (stateId === cursorId) crumb.setAttribute("aria-current", "step");
+        crumb.addEventListener("click", () => moveCursor(model, tree, stateId));
+      }
       breadcrumb.appendChild(crumb);
       if (i < path.length - 1) {
         const sep = document.createElement("span");
@@ -282,6 +306,17 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
         // Everything collapses to a single line by default — only the nodes
         // on the path the user has actually clicked into render in full.
         const onPath = path.includes(node.stateId);
+        if (reviewer) {
+          const compact = compactNodeCard(node, {
+            cursor: node.stateId === cursorId,
+            onPath,
+            dim: filtersActive() && !nodeMatchesFilters(node),
+            onSelect: () => moveCursor(model, tree, node.stateId),
+          });
+          cardEls.set(node.stateId, compact);
+          column.appendChild(compact);
+          return;
+        }
         const collapsed = !onPath || (filtersActive() && !nodeMatchesFilters(node));
         const card = nodeCard(node, {
           collapsed,
@@ -306,6 +341,16 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
     }
     drawConnectors(cardEls);
     renderInspectPane();
+    if (reviewer && cursorId) {
+      // keep the cursor's node in view when stepping through a wide tree
+      const el = cardEls.get(cursorId);
+      if (el) {
+        const box = columnsScroll.getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        if (rect.right > box.right) columnsScroll.scrollLeft += rect.right - box.right + 16;
+        else if (rect.left < box.left) columnsScroll.scrollLeft -= box.left - rect.left + 16;
+      }
+    }
   }
 
   renderTagFilters();
