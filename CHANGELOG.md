@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+- A note typed in the sidebar before the first analysis step was recorded (or while the sidebar's tree was
+  still empty) carried the "composer" placeholder and was silently dropped, so it vanished after a restart.
+  It now attaches to the latest state the source has recorded, and is kept and saved as soon as the first step
+  appears.
+- Failures to save, edit or remove an annotation are logged as warnings instead of being swallowed.
+
 ## 0.2.0
 
 ### Added
