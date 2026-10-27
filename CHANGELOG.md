@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.3
+
+### Fixed
+- A long analysis history no longer slows the notebook down. The panel's background refresh re-read every
+  recorded state from the database every 0.75 s (one connection each), which kept a core busy once a history held a
+  few hundred states and starved the notebook. A recorded state never changes, so `PmprovAdapter` now builds each
+  node once and reloads only the annotations of states they changed on, and the panel pushes the tree to the browser
+  only when it changed.
+- With a live source, the first tree is built by the refresh thread instead of while the panel is constructed, so
+  opening a notebook on a large history no longer waits for it.
+- "Export PDF" with a live source runs on the same background worker as annotation writes, after the writes already
+  queued, instead of on marimo's kernel thread, where it froze every other UI element while pmprov's storage queue drained.
+
 ## 0.2.2
 
 ### Fixed
