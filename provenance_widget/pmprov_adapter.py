@@ -353,12 +353,17 @@ class PmprovAdapter:
             params[record["param_id"].split(":", 1)[-1]] = value
         return params
 
-    def _require_bindings(self) -> None:
-        if not hasattr(self._rt.storage, "load_state_bindings"):
-            raise RuntimeError(
-                "Replaying a state needs pmprov >= 0.8.0 (it records which variable was bound to "
-                "which artifact at every state); the installed pmprov is older."
-            )
+    def _bindings(self, state_id: str) -> dict[str, str]:
+        """Variable name -> artifact version bound at *state_id* ({} before pmprov 0.8 / for old histories)."""
+        loader = getattr(self._rt.storage, "load_state_bindings", None)
+        return loader(state_id) if loader else {}
+
+    def _restore(self, state_id: str, name: str) -> Any:
+        """One variable of one state. pmprov < 0.8 cannot restore a single name, so it loads the state and picks it."""
+        try:
+            return self._rt.restore_state(state_id, names=[name]).variables.get(name)
+        except TypeError:  # an older restore_state() without the names argument
+            return self._rt.restore_state(state_id).variables.get(name)
 
     @staticmethod
     def _assigned_name(raw_line: str | None) -> str | None:
@@ -396,21 +401,22 @@ class PmprovAdapter:
     def snapshot_bindings(self, state_id: str) -> set[str]:
         """Names of the variables bound at *state_id*, without loading any data."""
         self.settle()
-        self._require_bindings()
-        bindings = self._rt.storage.load_state_bindings(state_id)
+        bindings = self._bindings(state_id)
         return set(bindings) if bindings else set(self._legacy_sources(state_id))
 
     def snapshot(self, state_id: str, names: list[str] | None = None) -> dict[str, Any]:
         """The variables bound at *state_id*, exactly as they were (all, or just *names*).
 
+        Works with every pmprov: 0.8+ records exact bindings per state; older
+        pmprov (and histories recorded before 0.8) are rebuilt from the step
+        that last assigned each variable, which is also exact but loads more.
         Names that are not bound there, or whose value pmprov could not load,
         are simply absent. Loaded values are cached by artifact version, so a
         frame that many states share (the raw event log) is read once. Treat
         the returned objects as read-only: they are shared with the cache.
         """
         self.settle()
-        self._require_bindings()
-        bindings = self._rt.storage.load_state_bindings(state_id)
+        bindings = self._bindings(state_id)
         legacy = {} if bindings else self._legacy_sources(state_id)
         known = bindings or legacy
         wanted = list(known) if names is None else [n for n in names if n in known]
@@ -422,7 +428,7 @@ class PmprovAdapter:
                 variables[name] = self._values[version]
                 continue
             source_state = state_id if bindings else legacy[name]
-            value = self._rt.restore_state(source_state, names=[name]).variables.get(name)
+            value = self._restore(source_state, name)
             if value is not None:
                 self._values[version] = value
                 variables[name] = value
