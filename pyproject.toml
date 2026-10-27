@@ -23,3 +23,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["provenance_widget"]
+
+[tool.pytest.ini_options]
+# The default run is the package's own tests. benchmarks/ and the pmprov
+# acceptance test in docs/ need a specific pmprov; run them explicitly.
+testpaths = ["tests"]
