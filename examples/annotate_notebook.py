@@ -36,6 +36,7 @@ omit_functions(
     "PmprovAdapter", "ProvenancePanel", "mo.ui.table", "show_table",
     "mo.ui.multiselect", "mo.ui.slider", "mo.vstack", "mo.md", "mo.stop",
     "mo.callout", "panel.snapshot", "panel.reactive_cursor", "snap.get",
+    "show_chart", "mo.as_html",
 )
 
 __generated_with = "0.23.16"
@@ -69,9 +70,10 @@ def _(PROJECT_ROOT):
 
     from tracker import init_marimo, operation_type, step_category, enable_logging
     from utils.event_enricher import create_case_log
+    from utils.event_charts import events_per_activity_chart, events_per_year_chart
     from utils.event_filters import filter_events_by_activity, filter_events_since
 
-    from provenance_widget.display import show_table
+    from provenance_widget.display import show_chart, show_table
     from provenance_widget.pmprov_adapter import PmprovAdapter
     from provenance_widget.widget import ProvenancePanel
 
@@ -92,9 +94,12 @@ def _(PROJECT_ROOT):
     operation_type("event_filter", filter_events_by_activity)
     operation_type("event_filter", filter_events_since)
     operation_type("case_aggregation", create_case_log)
+    operation_type("chart", events_per_activity_chart)
+    operation_type("chart", events_per_year_chart)
     # Category names must match the sidebar's categories to get their colors.
     step_category("CLEANING", "event_filter")
     step_category("AGGREGATION", "case_aggregation")
+    step_category("ANALYSIS", "chart")
 
     print("Session ID   :", rt.session_id)
     print("History name :", rt._history.name)
@@ -102,11 +107,14 @@ def _(PROJECT_ROOT):
         PmprovAdapter,
         ProvenancePanel,
         create_case_log,
+        events_per_activity_chart,
+        events_per_year_chart,
         filter_events_by_activity,
         filter_events_since,
         mo,
         pd,
         rt,
+        show_chart,
         show_table,
     )
 
@@ -117,7 +125,7 @@ def _(PmprovAdapter, ProvenancePanel, mo, rt):
     # replay stepper and use Replay on each annotation. Switch to
     # mode="analyst" and re-run this cell to annotate and edit instead.
     adapter = PmprovAdapter(rt)
-    panel = ProvenancePanel(source=adapter, mode="reviewer")
+    panel = ProvenancePanel(source=adapter, mode="analyst")
     # Every step in the sidebar (or Replay on an annotation) updates this
     # cursor; cells that call get_cursor() re-run when it moves.
     get_cursor = panel.reactive_cursor(mo.state)
@@ -204,6 +212,24 @@ def _(by_activity, mo, show_table, snap, state_id_activity):
 
 
 @app.cell
+def _(adapter, by_activity, events_per_activity_chart):
+    # Chart of step 2 (live, tracked by pmprov): the figure is stored with the
+    # state, so a reviewer replays it and "Export PDF" embeds it.
+    activity_chart = events_per_activity_chart(by_activity)
+
+    state_id_activity_chart = adapter.latest_state_id() or "events_per_activity"
+    return activity_chart, state_id_activity_chart
+
+
+@app.cell
+def _(activity_chart, mo, show_chart, snap, state_id_activity_chart):
+    _fig = snap.get("activity_chart", activity_chart)
+    mo.stop(_fig is None, mo.md("### Events per activity: " + snap.missing("activity_chart")))
+    show_chart(mo.as_html(_fig), artifact_id=state_id_activity_chart, artifact_name="events_per_activity")
+    return
+
+
+@app.cell
 def _(adapter, by_activity, filter_events_since, year_slider):
     # Step 3 – keep only recent events (live, tracked by pmprov)
     since_year = filter_events_since(by_activity, year_slider.value)
@@ -219,6 +245,23 @@ def _(mo, show_table, since_year, snap, state_id_year, year_slider):
     _heading = f"## 3. Events in {year_slider.value} or later: {len(_df):,} events" if snap.is_live else f"## 3. Events since year: {len(_df):,} events"
     _shown = show_table(mo.ui.table(_df.head(5)), artifact_id=state_id_year, artifact_name="events_since_year")
     mo.vstack([mo.md(_heading), _shown])
+    return
+
+
+@app.cell
+def _(adapter, events_per_year_chart, since_year):
+    # Chart of step 3 (live, tracked by pmprov)
+    year_chart = events_per_year_chart(since_year)
+
+    state_id_year_chart = adapter.latest_state_id() or "events_per_year"
+    return state_id_year_chart, year_chart
+
+
+@app.cell
+def _(mo, show_chart, snap, state_id_year_chart, year_chart):
+    _fig = snap.get("year_chart", year_chart)
+    mo.stop(_fig is None, mo.md("### Events per year: " + snap.missing("year_chart")))
+    show_chart(mo.as_html(_fig), artifact_id=state_id_year_chart, artifact_name="events_per_year")
     return
 
 
