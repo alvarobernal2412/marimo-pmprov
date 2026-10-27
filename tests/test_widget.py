@@ -323,3 +323,62 @@ def test_snapshot_reports_why_it_is_unavailable():
     snap = panel.snapshot(list(panel.widget.tree["nodes"])[0])
 
     assert "needs pmprov >= 0.8.0" in snap.missing("df")
+
+
+class _GrowingSource(_RecordingSource):
+    """A live history that is empty when the panel is built and records a step later."""
+
+    def __init__(self):
+        super().__init__()
+        self.states: list[str] = []
+
+    def get_tree(self):
+        from provenance_widget.interfaces import ProvenanceNode, ProvenanceTree
+
+        nodes = {
+            sid: ProvenanceNode(
+                state_id=sid, parent_state_id=None, branch_id="main",
+                operation=MockProvenanceSource().get_tree().nodes["s0"].operation,
+                params={}, delta=MockProvenanceSource().get_tree().nodes["s0"].delta,
+            )
+            for sid in self.states
+        }
+        return ProvenanceTree(nodes=nodes, root_id=self.states[0] if self.states else "", branches={})
+
+
+def test_composer_commit_is_saved_on_the_latest_state_the_source_has_recorded():
+    """The sidebar sends "composer" when its tree was empty; the source may have recorded steps since."""
+    source = _GrowingSource()
+    panel = ProvenancePanel(source=source, auto_refresh=False)
+    source.states = ["s1", "s2"]
+
+    panel.widget.commits = [*panel.widget.commits, {"stateId": "composer", "annotation": {"note": "whole analysis"}}]
+
+    assert source.persisted == [("s2", {"note": "whole analysis"})]
+
+
+def test_commit_made_before_any_step_is_saved_when_the_first_step_is_recorded(caplog):
+    source = _GrowingSource()
+    panel = ProvenancePanel(source=source, auto_refresh=False)
+
+    with caplog.at_level("WARNING"):
+        panel.widget.commits = [*panel.widget.commits, {"stateId": "composer", "annotation": {"note": "early"}}]
+    assert source.persisted == []
+    assert "only in the sidebar for now" in caplog.text
+
+    source.states = ["s1"]
+    panel.refresh()
+
+    assert source.persisted == [("s1", {"note": "early"})]
+
+
+def test_failing_persistence_is_logged_not_silent(caplog):
+    class _Failing(_RecordingSource):
+        def persist_annotation(self, state_id, annotation_dict):
+            raise RuntimeError("disk full")
+
+    panel = ProvenancePanel(source=_Failing())
+    with caplog.at_level("WARNING"):
+        panel.commit_annotation({"annotationId": "a1", "note": "x"}, state_id="s1")
+
+    assert "Could not save annotation" in caplog.text and "disk full" in caplog.text

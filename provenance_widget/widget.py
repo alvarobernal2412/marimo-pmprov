@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import pathlib
 import re
 import threading
@@ -12,6 +13,11 @@ import traitlets
 from provenance_widget.interfaces import EmptyProvenanceSource, ProvenanceSource
 from provenance_widget.serialize import tree_to_json
 from provenance_widget.snapshot import Snapshot
+
+_log = logging.getLogger(__name__)
+
+# what a commit carries as its state when the sidebar had no recorded state to point at
+_UNRESOLVED_STATES = ("composer", "python")
 
 _STATIC_DIR = pathlib.Path(__file__).parent / "static"
 
@@ -98,6 +104,8 @@ class ProvenancePanel:
         )
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0
+        # commits made while no analysis state was recorded yet (see _persist_commit)
+        self._pending_commits: list[dict] = []
         # frontend annotation id -> id the source assigned when persisting it
         self._source_ids: dict[str, str] = {}
         self._handled_removals: set[str] = set()
@@ -168,6 +176,7 @@ class ProvenancePanel:
         # from a cell that isn't itself re-running doesn't reliably push a
         # fresh sync message to an already-displayed widget — force one.
         self.widget.send_state(["tree"])
+        self._persist_pending()
 
     def _on_commits_changed(self, change: dict) -> None:
         """Persist newly added commits through the source, if it supports it.
@@ -184,17 +193,54 @@ class ProvenancePanel:
         if not hasattr(self._source, "persist_annotation"):
             return
         for commit in new_commits:
-            annotation = commit.get("annotation") or {}
-            try:
-                source_id = self._source.persist_annotation(commit.get("stateId"), annotation)
-            except Exception:
-                continue  # a persistence failure shouldn't break the widget's own UI state
-            if source_id and annotation.get("annotationId"):
-                self._source_ids[annotation["annotationId"]] = source_id
-                self.widget.annotation_aliases = {
-                    **self.widget.annotation_aliases,
-                    annotation["annotationId"]: source_id,
-                }
+            self._persist_commit(commit)
+
+    def _resolve_state(self, state_id: str | None) -> str | None:
+        """The recorded state a commit should attach to, or None if nothing is recorded yet.
+
+        The sidebar targets the latest state it knows of, or the placeholder "composer" when its copy of the
+        tree is empty; its tree can also be one refresh behind a notebook that is still recording steps.
+        Those placeholders are re-resolved against the source's own latest state; an explicit state id is kept.
+        """
+        if state_id and state_id not in _UNRESOLVED_STATES:
+            return state_id
+        self.refresh()
+        return self.latest_state_id
+
+    def _persist_commit(self, commit: dict) -> bool:
+        """Save one commit through the source; keep it for later if there is no recorded state to attach it to."""
+        annotation = commit.get("annotation") or {}
+        _log.info("Annotation %r committed with state %r", annotation.get("annotationId"), commit.get("stateId"))
+        state_id = self._resolve_state(commit.get("stateId"))
+        if state_id is None:
+            _log.warning(
+                "Annotation %r is only in the sidebar for now: no analysis state is recorded yet to attach it to. "
+                "It is saved as soon as the first step is recorded.", annotation.get("annotationId"))
+            self._pending_commits.append(commit)
+            return False
+        try:
+            source_id = self._source.persist_annotation(state_id, annotation)
+        except Exception:
+            # a persistence failure shouldn't break the widget's own UI state, but it must not be silent
+            _log.warning("Could not save annotation %r on state %r", annotation.get("annotationId"),
+                         state_id, exc_info=True)
+            return False
+        _log.info("Annotation %r on state %r saved by the source as %r", annotation.get("annotationId"), state_id, source_id)
+        if source_id and annotation.get("annotationId"):
+            self._source_ids[annotation["annotationId"]] = source_id
+            self.widget.annotation_aliases = {
+                **self.widget.annotation_aliases,
+                annotation["annotationId"]: source_id,
+            }
+        return True
+
+    def _persist_pending(self) -> None:
+        """Save the commits that were made before any step was recorded, now that there is a state."""
+        if not self._pending_commits or self.latest_state_id is None:
+            return
+        pending, self._pending_commits = self._pending_commits, []
+        for commit in pending:
+            self._persist_commit({**commit, "stateId": self.latest_state_id})
 
     def _on_mode_changed(self, change: dict) -> None:
         # The persona is fixed at construction; undo any frontend attempt to change it.
@@ -221,7 +267,7 @@ class ProvenancePanel:
                 try:
                     self._source.remove_annotation(source_id)
                 except Exception:
-                    pass
+                    _log.warning("Could not remove annotation %r", source_id, exc_info=True)
             if source_id != annotation_id and source_id not in removed:
                 # the source's own copy of it shows up in the tree under its id
                 self._handled_removals.add(source_id)
@@ -243,7 +289,7 @@ class ProvenancePanel:
                         self._source_ids.get(annotation_id, annotation_id), annotation
                     )
                 except Exception:
-                    pass
+                    _log.warning("Could not update annotation %r", annotation_id, exc_info=True)
 
     def _on_export_requested(self, change: dict) -> None:
         request = change["new"] or {}

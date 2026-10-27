@@ -272,3 +272,21 @@ def test_editing_tags_of_an_annotation_from_an_earlier_session_takes_effect(rt, 
 
     assert restarted._state_tag_names(state_id) == {"renamed"}
     assert restarted.get_tree().nodes[state_id].annotations[0].note == "second, edited"
+
+
+def test_sidebar_note_made_before_the_first_step_ends_up_in_pmprov(rt, event_log):
+    """The exploratory tool builds its panel before any step is recorded; a note typed in the sidebar then
+    carries the "composer" placeholder and must still be saved once a step exists."""
+    from provenance_widget.widget import ProvenancePanel
+
+    adapter = PmprovAdapter(rt)
+    panel = ProvenancePanel(source=adapter, auto_refresh=False)
+    panel.widget.commits = [{"stateId": "composer", "annotation": {"annotationId": "n1", "note": "typed early"}}]
+
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="f", raw_line="df=f(df)",
+                  args=[event_log], kwargs={})
+    _settle(rt)
+    panel.refresh()
+
+    annotations = adapter.get_tree().nodes[rt._current_state_id].annotations
+    assert [a.note for a in annotations] == ["typed early"]
