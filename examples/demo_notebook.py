@@ -36,9 +36,9 @@ def _():
 
 @app.cell
 def _(MockProvenanceSource, ProvenancePanel):
-    # The persona is fixed when the panel is created: "student" annotates
+    # The persona is fixed when the panel is created: "analyst" annotates
     # (add/edit/delete), "reviewer" replays the analysis step by step.
-    panel = ProvenancePanel(source=MockProvenanceSource(), mode="student")
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="analyst")
     return (panel,)
 
 

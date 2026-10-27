@@ -133,7 +133,7 @@ def _(PmprovAdapter, ProvenancePanel, rt):
     # sources like this one, so tracked cells below don't call settle() or
     # refresh() themselves.
     adapter = PmprovAdapter(rt)
-    panel = ProvenancePanel(source=adapter, mode="student")
+    panel = ProvenancePanel(source=adapter, mode="reviewer")
     return adapter, panel
 
 
