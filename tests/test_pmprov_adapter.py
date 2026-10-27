@@ -125,3 +125,125 @@ def test_remove_annotation_deletes_it_from_pmprov(rt, event_log):
     adapter.remove_annotation(annotation_id)
 
     assert adapter.get_tree().nodes[state_id].annotations == []
+
+
+needs_bindings = pytest.mark.skipif(
+    not hasattr(StorageBackend, "load_state_bindings"), reason="needs pmprov >= 0.8.0 (state bindings)"
+)
+
+
+@needs_bindings
+def test_snapshot_gives_each_variable_as_bound_at_that_state(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
+                  args=[event_log], kwargs={})
+    first_state = rt._current_state_id
+    rt.trace_step(func=lambda df: df.head(1), func_name="first_row", raw_line="small = first_row(with_x)",
+                  args=[event_log.assign(x=1)], kwargs={})
+    second_state = rt._current_state_id
+    _settle(rt)
+    adapter = PmprovAdapter(rt)
+
+    earlier = adapter.snapshot(first_state)
+    later = adapter.snapshot(second_state)
+
+    assert set(earlier) == {"with_x"} and len(earlier["with_x"]) == 2
+    assert set(later) == {"with_x", "small"}
+    assert len(later["with_x"]) == 2 and len(later["small"]) == 1
+    assert adapter.snapshot_bindings(second_state) == {"with_x", "small"}
+
+
+@needs_bindings
+def test_snapshot_loads_only_the_requested_names(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
+                  args=[event_log], kwargs={})
+    _settle(rt)
+    adapter = PmprovAdapter(rt)
+
+    assert set(adapter.snapshot(rt._current_state_id, names=["with_x", "nope"])) == {"with_x"}
+    assert adapter.snapshot(rt._current_state_id, names=["nope"]) == {}
+
+
+@needs_bindings
+def test_snapshot_of_a_history_recorded_without_bindings_is_still_exact(rt, event_log, monkeypatch):
+    """Histories recorded before pmprov 0.8 have no bindings; they replay from each step's own output."""
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
+                  args=[event_log], kwargs={})
+    first_state = rt._current_state_id
+    rt.trace_step(func=lambda df: df.head(1), func_name="first_row", raw_line="small = first_row(with_x)",
+                  args=[event_log.assign(x=1)], kwargs={})
+    second_state = rt._current_state_id
+    _settle(rt)
+    monkeypatch.setattr(rt.storage, "load_state_bindings", lambda state_id: {})
+    adapter = PmprovAdapter(rt)
+
+    assert adapter.snapshot_bindings(first_state) == {"with_x"}
+    assert set(adapter.snapshot(second_state)) == {"with_x", "small"}
+    assert len(adapter.snapshot(first_state)["with_x"]) == 2
+    assert len(adapter.snapshot(second_state, names=["small"])["small"]) == 1
+
+
+def test_readable_params_drops_artifact_refs_and_function_prefix():
+    raw = [
+        {"param_id": "f:event_log", "value": {"value_type": "artifact_state_ref", "artifact_state_id": "x"}},
+        {"param_id": "f:year", "value": {"value_type": "scalar", "value": 2008}},
+        {"param_id": "f:activities", "value": {"value_type": "list", "value": ["a", "b"]}},
+        {"param_id": "g:plain", "value": 3},
+    ]
+    assert PmprovAdapter._readable_params(raw) == {"year": 2008, "activities": ["a", "b"], "plain": 3}
+
+
+def _state_with_two_annotations(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="f", raw_line="df=f(df)", args=[event_log], kwargs={})
+    _settle(rt)
+    state_id = rt._current_state_id
+    adapter = PmprovAdapter(rt)
+    first = adapter.persist_annotation(state_id, {"note": "first", "tags": [{"name": "shared"}, {"name": "only-first"}]})
+    second = adapter.persist_annotation(state_id, {"note": "second", "tags": [{"name": "shared"}]})
+    return adapter, state_id, first, second
+
+
+def test_removing_an_annotation_removes_the_tags_only_it_carried(rt, event_log):
+    adapter, state_id, first, _ = _state_with_two_annotations(rt, event_log)
+
+    adapter.remove_annotation(first)
+
+    assert adapter._state_tag_names(state_id) == {"shared"}  # "only-first" went, "shared" is still needed
+
+
+def test_removing_the_last_annotation_removes_its_tags(rt, event_log):
+    adapter, state_id, first, second = _state_with_two_annotations(rt, event_log)
+
+    adapter.remove_annotation(first)
+    adapter.remove_annotation(second)
+
+    assert adapter._state_tag_names(state_id) == set()
+
+
+def test_deleting_an_annotation_from_an_earlier_session_cleans_up_when_it_was_the_last(rt, event_log):
+    adapter, state_id, first, second = _state_with_two_annotations(rt, event_log)
+    adapter.remove_annotation(second)  # keep one annotation on the state
+
+    restarted = PmprovAdapter(rt)  # a new session: the adapter no longer knows who carried which tag
+    restarted.remove_annotation(first)
+
+    assert restarted._state_tag_names(state_id) == set()
+
+
+def test_deleting_one_of_two_annotations_after_a_restart_keeps_the_tags(rt, event_log):
+    adapter, state_id, first, second = _state_with_two_annotations(rt, event_log)
+
+    restarted = PmprovAdapter(rt)
+    restarted.remove_annotation(second)
+
+    assert restarted._state_tag_names(state_id) == {"shared", "only-first"}
+
+
+def test_editing_tags_of_an_annotation_from_an_earlier_session_takes_effect(rt, event_log):
+    adapter, state_id, first, second = _state_with_two_annotations(rt, event_log)
+    adapter.remove_annotation(first)
+
+    restarted = PmprovAdapter(rt)
+    restarted.update_annotation(second, {"note": "second, edited", "tags": [{"name": "renamed"}]})
+
+    assert restarted._state_tag_names(state_id) == {"renamed"}
+    assert restarted.get_tree().nodes[state_id].annotations[0].note == "second, edited"
