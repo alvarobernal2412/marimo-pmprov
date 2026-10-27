@@ -1,4 +1,5 @@
 import type { ProvenanceTreeJson } from "../types";
+import { icon } from "../components/icons";
 import { cursorStateId, latestStateId, moveCursor, nextChoices, pathTo } from "../replay";
 
 interface AnyModel {
@@ -7,11 +8,19 @@ interface AnyModel {
   save_changes(): void;
 }
 
-function button(label: string, title: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
+// Icon-only transport button: the glyph is decorative, the label is the
+// tooltip and what screen readers announce.
+function button(
+  glyph: "skipBack" | "stepBack" | "stepForward" | "skipForward",
+  label: string,
+  disabled: boolean,
+  onClick: () => void,
+): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.className = "pw-replay-btn";
-  btn.textContent = label;
-  btn.title = title;
+  btn.appendChild(icon(glyph, 16));
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
   btn.disabled = disabled;
   btn.addEventListener("click", onClick);
   return btn;
@@ -63,14 +72,14 @@ export function renderReplayBar(container: HTMLElement, model: AnyModel): void {
 
   const controls = document.createElement("div");
   controls.className = "pw-replay-controls";
-  controls.appendChild(button("First", "Jump to the first state", cursor === tree.rootId, () => go(tree.rootId)));
+  controls.appendChild(button("skipBack", "First state", cursor === tree.rootId, () => go(tree.rootId)));
   controls.appendChild(
-    button("‹ Back", "Step back to the previous state", !node.parentStateId, () => go(node.parentStateId!)),
+    button("stepBack", "Back one step", !node.parentStateId, () => go(node.parentStateId!)),
   );
   controls.appendChild(
-    button("Next ›", "Step forward to the next state", choices.length === 0, () => go(choices[0].stateId)),
+    button("stepForward", "Next step", choices.length === 0, () => go(choices[0].stateId)),
   );
-  controls.appendChild(button("Latest", "Jump to the latest state", cursor === latest, () => go(latest!)));
+  controls.appendChild(button("skipForward", "Latest state", cursor === latest, () => go(latest!)));
   bar.appendChild(controls);
   bar.addEventListener("keydown", (evt) => {
     if (evt.key === "ArrowLeft" && node.parentStateId) go(node.parentStateId);

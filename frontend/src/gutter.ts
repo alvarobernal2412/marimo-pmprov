@@ -82,7 +82,7 @@ export function armGutterAffordance(
   }
 
   document.addEventListener("mouseover", (evt: MouseEvent) => {
-    if (model.get("mode") !== "student" || document.body.classList.contains("pw-picking-active")) {
+    if (model.get("mode") !== "analyst" || document.body.classList.contains("pw-picking-active")) {
       hideButton();
       return;
     }

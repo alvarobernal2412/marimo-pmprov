@@ -48,7 +48,7 @@ function parseTags(raw: string): { name: string; color: string }[] {
 }
 
 // One annotation in the history list, as a compact row: title + time, tag
-// chips underneath, details on click. Student persona: edit / delete (inline
+// chips underneath, details on click. Analyst persona: edit / delete (inline
 // two-step confirm, no browser dialogs). Reviewer persona: read-only, plus
 // "Replay" to move the stepper to the state this annotation sits on.
 export function annotationCard(
