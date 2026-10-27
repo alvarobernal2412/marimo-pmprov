@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import logging
 import pathlib
 import re
@@ -106,6 +107,16 @@ class ProvenancePanel:
         self._persisted_commit_count = 0
         # commits made while no analysis state was recorded yet (see _persist_commit)
         self._pending_commits: list[dict] = []
+        self._pending_lock = threading.Lock()
+        # Saving an annotation through a live source waits for its storage queue, which can hold minutes of
+        # artifact writes. Doing that on marimo's kernel thread freezes every UI element in the notebook until it
+        # drains, so such sources get one background worker (in order, so an edit never overtakes its own add).
+        self._writes: concurrent.futures.ThreadPoolExecutor | None = (
+            concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw-annotations")
+            if hasattr(self._source, "settle")
+            else None
+        )
+        self._write_futures: list[concurrent.futures.Future] = []
         # frontend annotation id -> id the source assigned when persisting it
         self._source_ids: dict[str, str] = {}
         self._handled_removals: set[str] = set()
@@ -160,6 +171,18 @@ class ProvenancePanel:
     def tree_surface(self) -> ProvenanceWidget:
         return self.widget
 
+    def _run_write(self, function, *args) -> None:
+        """Run a write to the source, off the kernel thread when the source is a live one."""
+        if self._writes is None:
+            function(*args)
+            return
+        self._write_futures = [f for f in self._write_futures if not f.done()]
+        self._write_futures.append(self._writes.submit(function, *args))
+
+    def wait_for_persistence(self, timeout: float | None = None) -> None:
+        """Block until every annotation write queued so far has reached the source (for scripts and tests)."""
+        concurrent.futures.wait(list(self._write_futures), timeout=timeout)
+
     def refresh(self) -> None:
         """Re-pull the tree from the source.
 
@@ -193,7 +216,7 @@ class ProvenancePanel:
         if not hasattr(self._source, "persist_annotation"):
             return
         for commit in new_commits:
-            self._persist_commit(commit)
+            self._run_write(self._persist_commit, commit)
 
     def _resolve_state(self, state_id: str | None) -> str | None:
         """The recorded state a commit should attach to, or None if nothing is recorded yet.
@@ -216,7 +239,8 @@ class ProvenancePanel:
             _log.warning(
                 "Annotation %r is only in the sidebar for now: no analysis state is recorded yet to attach it to. "
                 "It is saved as soon as the first step is recorded.", annotation.get("annotationId"))
-            self._pending_commits.append(commit)
+            with self._pending_lock:
+                self._pending_commits.append(commit)
             return False
         try:
             source_id = self._source.persist_annotation(state_id, annotation)
@@ -238,9 +262,10 @@ class ProvenancePanel:
         """Save the commits that were made before any step was recorded, now that there is a state."""
         if not self._pending_commits or self.latest_state_id is None:
             return
-        pending, self._pending_commits = self._pending_commits, []
+        with self._pending_lock:
+            pending, self._pending_commits = self._pending_commits, []
         for commit in pending:
-            self._persist_commit({**commit, "stateId": self.latest_state_id})
+            self._run_write(self._persist_commit, {**commit, "stateId": self.latest_state_id})
 
     def _on_mode_changed(self, change: dict) -> None:
         # The persona is fixed at construction; undo any frontend attempt to change it.
@@ -262,16 +287,19 @@ class ProvenancePanel:
             if annotation_id in self._handled_removals:
                 continue
             self._handled_removals.add(annotation_id)
-            source_id = self._source_ids.get(annotation_id, annotation_id)
-            if hasattr(self._source, "remove_annotation"):
-                try:
-                    self._source.remove_annotation(source_id)
-                except Exception:
-                    _log.warning("Could not remove annotation %r", source_id, exc_info=True)
-            if source_id != annotation_id and source_id not in removed:
-                # the source's own copy of it shows up in the tree under its id
-                self._handled_removals.add(source_id)
-                self.widget.removed_annotations = [*removed, source_id]
+            self._run_write(self._remove_annotation_in_source, annotation_id, removed)
+
+    def _remove_annotation_in_source(self, annotation_id: str, removed: list) -> None:
+        source_id = self._source_ids.get(annotation_id, annotation_id)
+        if hasattr(self._source, "remove_annotation"):
+            try:
+                self._source.remove_annotation(source_id)
+            except Exception:
+                _log.warning("Could not remove annotation %r", source_id, exc_info=True)
+        if source_id != annotation_id and source_id not in removed:
+            # the source's own copy of it shows up in the tree under its id
+            self._handled_removals.add(source_id)
+            self.widget.removed_annotations = [*removed, source_id]
 
     def _on_edited_changed(self, change: dict) -> None:
         edited = change["new"] or {}
@@ -284,12 +312,13 @@ class ProvenancePanel:
                 continue
             self._handled_edits[annotation_id] = annotation
             if hasattr(self._source, "update_annotation"):
-                try:
-                    self._source.update_annotation(
-                        self._source_ids.get(annotation_id, annotation_id), annotation
-                    )
-                except Exception:
-                    _log.warning("Could not update annotation %r", annotation_id, exc_info=True)
+                self._run_write(self._update_annotation_in_source, annotation_id, annotation)
+
+    def _update_annotation_in_source(self, annotation_id: str, annotation: dict) -> None:
+        try:
+            self._source.update_annotation(self._source_ids.get(annotation_id, annotation_id), annotation)
+        except Exception:
+            _log.warning("Could not update annotation %r", annotation_id, exc_info=True)
 
     def _on_export_requested(self, change: dict) -> None:
         request = change["new"] or {}

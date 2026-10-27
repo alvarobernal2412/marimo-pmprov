@@ -287,6 +287,7 @@ def test_sidebar_note_made_before_the_first_step_ends_up_in_pmprov(rt, event_log
                   args=[event_log], kwargs={})
     _settle(rt)
     panel.refresh()
+    panel.wait_for_persistence()
 
     annotations = adapter.get_tree().nodes[rt._current_state_id].annotations
     assert [a.note for a in annotations] == ["typed early"]

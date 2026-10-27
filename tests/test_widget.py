@@ -382,3 +382,55 @@ def test_failing_persistence_is_logged_not_silent(caplog):
         panel.commit_annotation({"annotationId": "a1", "note": "x"}, state_id="s1")
 
     assert "Could not save annotation" in caplog.text and "disk full" in caplog.text
+
+
+class _SlowLiveSource(_EditableSource):
+    """A live source (has settle()) whose writes wait on a gate, like pmprov's storage queue behind artifact writes."""
+
+    def __init__(self):
+        super().__init__()
+        import threading
+
+        self.gate = threading.Event()
+        self.order: list[str] = []
+
+    def settle(self):  # marks it as a live source
+        pass
+
+    def persist_annotation(self, state_id, annotation_dict):
+        self.gate.wait(timeout=10)
+        self.order.append(f"add:{annotation_dict.get('note')}")
+        return super().persist_annotation(state_id, annotation_dict)
+
+    def update_annotation(self, annotation_id, annotation_dict):
+        self.order.append(f"edit:{annotation_dict.get('note')}")
+        super().update_annotation(annotation_id, annotation_dict)
+
+
+def test_a_slow_live_source_does_not_hold_up_the_caller():
+    """The observer runs on marimo's kernel thread; waiting there for the source froze every UI element."""
+    import time
+
+    source = _SlowLiveSource()
+    panel = ProvenancePanel(source=source, auto_refresh=False)
+
+    started = time.monotonic()
+    panel.widget.commits = [{"stateId": "s1", "annotation": {"annotationId": "a1", "note": "first"}}]
+    assert time.monotonic() - started < 1  # returned although the source is still blocked
+    assert source.persisted == []
+
+    source.gate.set()
+    panel.wait_for_persistence(timeout=10)
+    assert source.persisted == [("s1", {"annotationId": "a1", "note": "first"})]
+
+
+def test_writes_to_a_live_source_keep_their_order():
+    source = _SlowLiveSource()
+    panel = ProvenancePanel(source=source, auto_refresh=False)
+
+    panel.widget.commits = [{"stateId": "s1", "annotation": {"annotationId": "a1", "note": "first"}}]
+    panel.widget.edited_annotations = {"a1": {"annotationId": "a1", "note": "second"}}
+    source.gate.set()
+    panel.wait_for_persistence(timeout=10)
+
+    assert source.order == ["add:first", "edit:second"]
