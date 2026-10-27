@@ -36,7 +36,7 @@ import marimo as mo
 from provenance_widget.mock_source import MockProvenanceSource
 from provenance_widget.widget import ProvenancePanel
 
-panel = ProvenancePanel(source=MockProvenanceSource(), mode="student")
+panel = ProvenancePanel(source=MockProvenanceSource(), mode="analyst")
 
 # mo.sidebar(...) must be the last bare expression in its own cell to render —
 # it cannot be assigned to a variable and displayed from a different cell.
@@ -44,18 +44,22 @@ mo.sidebar(panel.sidebar())
 ```
 
 The persona is chosen when the panel is created and can't be changed from
-the UI: `ProvenancePanel(mode="student")` or `mode="reviewer"`.
+the UI: `ProvenancePanel(mode="analyst")` (annotates; `"student"` still works
+as a deprecated alias) or `mode="reviewer"`.
 
-The sidebar has three tabs:
+The sidebar is one **Annotations** tab. A **Tree** tab is available too, but
+only if you opt in when creating the panel with `ProvenancePanel(show_tree=True)`;
+it can't be switched on from the UI. With only one tab, no tab bar is shown.
 
-- **Annotations** — a chronological feed (oldest first, each with a small
-  timestamp). *Student*: composer to add annotations, plus **Edit** and
-  **Delete** on every card (changes are written through to the source when it
-  supports `update_annotation` / `remove_annotation`, as `PmprovAdapter`
-  does). *Reviewer*: read-only, with a **Replay** button on every annotation.
-- **Tree** — a Miller-columns view of the full provenance history, with
-  filter chips for tags and linked artifacts and an inline inspector.
-- **Config** — shows the persona the panel was created with.
+- **Annotations** — a chronological list (oldest first, each with a small
+  timestamp). *Analyst*: a composer at the top (pick a notebook output as the
+  target, or clear it to annotate the whole analysis, which attaches to the
+  latest state), plus edit and delete icons on each annotation (written
+  through to the source when it supports `update_annotation` /
+  `remove_annotation`, as `PmprovAdapter` does). *Reviewer*: read-only, with a
+  **Replay** button on every annotation.
+- **Tree** (opt-in) — a Miller-columns view of the full provenance history,
+  with filter chips for tags and linked artifacts and an inline inspector.
 
 #### Reviewer replay
 
@@ -67,6 +71,49 @@ forks. **Latest** follows the most recent recorded state as the analysis
 grows. From Python: `panel.cursor_state_id`, `panel.latest_state_id`,
 `panel.go_to(state_id)`, `panel.go_latest()`, and `panel.widget.replay`
 (`{"stateId", "params", "isLatest"}`) for notebook cells that want to react.
+
+#### Replay renders the whole notebook
+
+With a `PmprovAdapter` source, stepping (or clicking **Replay** on an
+annotation) can re-render the notebook as it stood at that state, from
+pmprov's recorded snapshots. Wire it up in three steps:
+
+```python
+# 1. bind the replay cursor to a marimo state (a reviewer starts at the latest recorded state)
+get_cursor = panel.reactive_cursor(mo.state)
+
+# 2. one cell turns the cursor into a snapshot of every variable at that state
+snap = panel.snapshot(get_cursor())
+
+# 3. display cells read from it; `live` is used when there is no snapshot (analysts)
+df = snap.get("by_activity", by_activity)      # None = nothing to show at this step
+mo.stop(df is None, mo.md(snap.missing("by_activity")))   # "not computed yet" or "not stored by pmprov"
+mo.callout(mo.md(snap.banner()))               # "Snapshot of the analysis after ... (step n)"
+```
+
+Values load lazily, one variable at a time, from pmprov's recorded state
+(`restore_state(names=...)`, cached per artifact version). Treat them as
+read-only. This needs **pmprov >= 0.9.0**. 0.8.0 works for most notebooks but
+misses plain aliases (`df = other`) and objects changed through another
+variable (`ax.bar(...)` changing `fig`); with a pmprov older than 0.8.0 the
+snapshot reports why it is unavailable instead of showing wrong data.
+
+Keep computing and displaying in separate cells: a display cell that also
+computed would re-run, and re-record a step, every time the reviewer steps.
+See `examples/annotate_notebook.py`.
+
+To have pmprov track a notebook while you use it, start marimo through the
+launcher; plain `marimo run` / `marimo edit` do not apply pmprov's patch (marimo
+loads a notebook by parsing it, so the notebook's own top-level patch never runs):
+
+```bash
+python -m provenance_widget.marimo_launcher run notebook.py
+python -m provenance_widget.marimo_launcher edit notebook.py --omit my_helper
+```
+
+It leaves the widget's own calls and common marimo UI calls out of the
+provenance tree; `--omit NAME` adds more. Viewing is read-only: nothing is checked out and no new
+steps are recorded.
 
 ### Tagging notebook outputs so they can be picked
 
