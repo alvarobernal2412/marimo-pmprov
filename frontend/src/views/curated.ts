@@ -21,7 +21,7 @@ function renderTargetSelector(model: AnyModel): HTMLElement {
 
   if (!artifactId) {
     target.classList.add("pw-target-selector-empty");
-    target.textContent = "No target selected — use \"Pick from notebook\" or hover an element's \"+\".";
+    target.textContent = "No target yet. Pick an output, or hover one and press +.";
     return target;
   }
 
@@ -46,38 +46,51 @@ function renderTargetSelector(model: AnyModel): HTMLElement {
   return target;
 }
 
-function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
+function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement {
   const composer = document.createElement("div");
   composer.className = "pw-composer";
 
-  composer.appendChild(renderTargetSelector(model));
+  // "Pick from notebook" belongs with the target it fills in.
+  const targetRow = document.createElement("div");
+  targetRow.className = "pw-target-row";
+  targetRow.appendChild(renderTargetSelector(model));
+  if (pickButton) targetRow.appendChild(pickButton);
+  composer.appendChild(targetRow);
 
   const nav = model as unknown as TreeNavState;
   const draft = (nav._pwDraft ??= { note: "", tags: "" });
 
   const noteField = document.createElement("textarea");
-  noteField.placeholder = "Describe reasoning for this analytical step...";
+  noteField.placeholder = "Describe your reasoning for this step…";
+  noteField.rows = 2;
+  noteField.setAttribute("aria-label", "Annotation note");
   noteField.value = draft.note;
   noteField.addEventListener("input", () => (draft.note = noteField.value));
   composer.appendChild(noteField);
 
+  const tagRow = document.createElement("div");
+  tagRow.className = "pw-composer-row";
+  composer.appendChild(tagRow);
+
   const tagField = document.createElement("input");
-  tagField.placeholder = "#tags";
+  tagField.placeholder = "#tags, separated by spaces";
+  tagField.setAttribute("aria-label", "Annotation tags");
   tagField.value = draft.tags;
   tagField.addEventListener("input", () => (draft.tags = tagField.value));
-  composer.appendChild(tagField);
+  tagRow.appendChild(tagField);
 
   const commitBtn = document.createElement("button");
   commitBtn.className = "pw-commit-btn";
-  commitBtn.textContent = "Commit annotation";
-  commitBtn.addEventListener("click", () => {
+  commitBtn.textContent = "Add";
+  commitBtn.title = "Add annotation (Ctrl+Enter)";
+  const commit = (): void => {
     const selection = (model.get("selection") as { artifact?: Record<string, unknown> })?.artifact ?? {};
     const newAnnotation: AnnotationJson = {
       annotationId: `ann-${Date.now()}`,
       title: noteField.value.slice(0, 40) || "Untitled annotation",
       note: noteField.value,
       tags: tagField.value
-        .split(" ")
+        .split(/\s+/)
         .filter(Boolean)
         .map((name) => ({ name: name.replace(/^#/, ""), color: "#64748B" })),
       artifacts: selection.artifactId
@@ -100,7 +113,6 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
     const targetArtifactId = newAnnotation.artifacts[0]?.artifactId;
     const stateId = targetArtifactId && tree.nodes[targetArtifactId] ? targetArtifactId : "composer";
 
-    const existing = model.get("commits") as unknown[];
     // Clear the draft first: setting "commits" re-renders the sidebar
     // synchronously, and the fresh composer would otherwise reload the old text.
     noteField.value = "";
@@ -108,15 +120,20 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
     draft.note = "";
     draft.tags = "";
 
+    const existing = model.get("commits") as unknown[];
     model.set("commits", [...existing, { stateId, annotation: newAnnotation }]);
     model.save_changes();
+  };
+  commitBtn.addEventListener("click", commit);
+  noteField.addEventListener("keydown", (evt) => {
+    if (evt.key === "Enter" && (evt.ctrlKey || evt.metaKey)) commit();
   });
-  composer.appendChild(commitBtn);
+  tagRow.appendChild(commitBtn);
 
   return composer;
 }
 
-export function renderCurated(container: HTMLElement, model: AnyModel): void {
+export function renderCurated(container: HTMLElement, model: AnyModel, pickButton?: HTMLElement): void {
   // Remember which composer field had focus (and its caret) so a re-render
   // triggered by new provenance data doesn't also steal the user's cursor.
   const active = (container.getRootNode() as Document | ShadowRoot).activeElement;
@@ -130,21 +147,42 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
 
   if (mode === "reviewer") renderReplayBar(container, model);
 
+  if (mode === "student") {
+    container.appendChild(renderComposer(model, pickButton));
+    if (focusedField) {
+      const field = container.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+        `.pw-composer ${focusedField.tag.toLowerCase()}`,
+      );
+      field?.focus();
+      if (focusedField.start !== null) field?.setSelectionRange(focusedField.start, focusedField.end);
+    }
+  }
+
   const header = document.createElement("div");
-  header.className = "pw-tree-header";
-  const title = document.createElement("div");
-  title.className = "pw-tree-title";
-  title.textContent = "Annotation History";
+  header.className = "pw-list-header";
+  const title = document.createElement("span");
+  title.className = "pw-list-title";
+  title.textContent = "Annotations";
   header.appendChild(title);
-  const caption = document.createElement("div");
-  caption.className = "pw-tree-caption";
-  caption.textContent = "Every annotation made in this analysis, oldest first.";
-  header.appendChild(caption);
+  const count = document.createElement("span");
+  count.className = "pw-list-count";
+  count.textContent = String(rows.length);
+  header.appendChild(count);
+  const order = document.createElement("span");
+  order.className = "pw-list-order";
+  order.textContent = "oldest first";
+  header.appendChild(order);
   container.appendChild(header);
 
   const cursor = mode === "reviewer" ? cursorStateId(model, tree) : null;
   const rail = document.createElement("div");
   rail.className = "pw-commit-rail";
+  if (rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "pw-node-no-annotations";
+    empty.textContent = mode === "student" ? "None yet. Add the first one above." : "No annotations in this analysis.";
+    rail.appendChild(empty);
+  }
   rows.forEach((row) =>
     rail.appendChild(
       annotationCard(row, {
@@ -157,15 +195,4 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
     ),
   );
   container.appendChild(rail);
-
-  if (mode === "student") {
-    container.appendChild(renderComposer(container, model));
-    if (focusedField) {
-      const field = container.querySelector<HTMLTextAreaElement | HTMLInputElement>(
-        `.pw-composer ${focusedField.tag.toLowerCase()}`,
-      );
-      field?.focus();
-      if (focusedField.start !== null) field?.setSelectionRange(focusedField.start, focusedField.end);
-    }
-  }
 }

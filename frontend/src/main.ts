@@ -5,6 +5,7 @@ import { renderTree } from "./views/tree";
 import { renderConfig } from "./views/config";
 import { armPicker } from "./picker";
 import { armGutterAffordance } from "./gutter";
+import { icon } from "./components/icons";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -50,23 +51,27 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   });
   collapseObserver.observe(root);
 
-  const pickerRow = document.createElement("div");
-  pickerRow.className = "pw-picker-row";
   const pickBtn = document.createElement("button");
   pickBtn.className = "pw-pick-btn";
-  pickBtn.textContent = "Pick from notebook";
   let armed = false;
+  function setPickLabel(text: string): void {
+    pickBtn.textContent = "";
+    pickBtn.appendChild(icon("crosshair"));
+    pickBtn.appendChild(document.createTextNode(text));
+  }
+  setPickLabel("Pick");
+  pickBtn.title = "Pick an output from the notebook as the annotation target";
   function resetPickBtn(): void {
     armed = false;
     pickBtn.classList.remove("pw-pick-btn-armed");
-    pickBtn.textContent = "Pick from notebook";
+    setPickLabel("Pick");
     document.body.classList.remove("pw-picking-active");
   }
   pickBtn.addEventListener("click", () => {
     if (armed) return;
     armed = true;
     pickBtn.classList.add("pw-pick-btn-armed");
-    pickBtn.textContent = "Picking… (Esc to cancel)";
+    setPickLabel("Esc to cancel");
     document.body.classList.add("pw-picking-active");
     armPicker(
       model,
@@ -82,11 +87,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
       },
     );
   });
-  pickerRow.appendChild(pickBtn);
 
   function getVisibleTabs(): string[] {
     const visible = model.get("visible_tabs") as string[] | undefined;
-    return visible && visible.length > 0 ? visible : ["curated", "tree", "config"];
+    const tabs = visible && visible.length > 0 ? visible : ["curated", "tree", "config"];
+    return model.get("show_tree") ? tabs : tabs.filter((tab) => tab !== "tree");
   }
 
   function renderTabs(): void {
@@ -207,8 +212,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
       renderConfig(view, model);
       return;
     }
-    renderCurated(view, model);
-    if (model.get("mode") === "student") body.appendChild(pickerRow);
+    renderCurated(view, model, model.get("mode") === "student" ? pickBtn : undefined);
   }
 
   window.addEventListener("resize", () => {
@@ -242,6 +246,10 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   model.on("change:removed_annotations", renderBody);
   model.on("change:edited_annotations", renderBody);
   model.on("change:replay", renderBody);
+  model.on("change:show_tree", () => {
+    renderTabs();
+    renderBody();
+  });
   model.on("change:restore_request", renderRestoreBanner);
 
   armGutterAffordance(model, (selection) => {
