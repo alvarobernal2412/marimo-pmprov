@@ -1,7 +1,7 @@
 [project]
 name = "marimo-pmprov"
-version = "0.1.1"
-description = "A marimo anywidget for analytic provenance and annotation, decoupled from pmprov."
+version = "0.2.0"
+description = "A marimo anywidget for analytic provenance, annotation and replay on top of pmprov."
 requires-python = ">=3.11"
 dependencies = [
     "anywidget>=0.9",
@@ -10,11 +10,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pandas", "matplotlib", "altair", "vl-convert-python", "plotly"]
+dev = ["pytest>=8.0", "reportlab>=4", "pypdf", "pandas", "matplotlib", "altair", "vl-convert-python", "plotly"]
+# pmprov is optional: the widget runs against a mock source without it.
+# pmprov needs Python >= 3.13 and pins exact versions of marimo, pandas, etc.
+pmprov = ["pmprov>=0.9; python_version >= '3.13'"]
+# "Export PDF" in the analyst sidebar (ProvenancePanel.export_pdf). Embedding Plotly
+# figures also needs kaleido.
+pdf = ["reportlab>=4"]
 # For examples/provenance_demo-style notebooks that drive a real pmprov
-# RuntimeTracker. pmprov itself isn't listed here — PyPI rejects direct VCS
-# dependencies in published metadata (see git history) — install it
-# separately per the README's "Connecting a real pmprov-backed history".
+# RuntimeTracker.
 demo = ["networkx", "pydantic", "pyarrow"]
 
 [build-system]
