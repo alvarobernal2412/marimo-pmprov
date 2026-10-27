@@ -11,6 +11,7 @@ const PATHS: Record<string, string[]> = {
   stepBack: ["M18 4L6 12l12 8z"],
   stepForward: ["M6 4l12 8L6 20z"],
   skipForward: ["M5 4l10 8L5 20z", "M19 5v14"],
+  download: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"],
   crosshair: ["M12 2v4", "M12 18v4", "M2 12h4", "M18 12h4", "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8"],
 };
 

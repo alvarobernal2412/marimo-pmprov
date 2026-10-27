@@ -4,6 +4,7 @@ import { annotationCard } from "../components/annotation-card";
 import { collectAnnotations } from "../annotations";
 import { cursorStateId, latestStateId, moveCursor } from "../replay";
 import { icon } from "../components/icons";
+import { requestPdfExport } from "../export";
 import { renderReplayBar } from "./replay-bar";
 import type { TreeNavState } from "../nav-state";
 
@@ -166,6 +167,25 @@ function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement 
   return composer;
 }
 
+function renderExportButton(model: AnyModel, annotationCount: number): HTMLElement {
+  const pending = !!(model as unknown as TreeNavState)._pwExport?.pending;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "pw-export-btn";
+  button.disabled = pending || annotationCount === 0;
+  button.title = annotationCount === 0
+    ? "Add an annotation to export"
+    : "Export the annotation history as a PDF report";
+  button.appendChild(icon("download", 12));
+  button.appendChild(document.createTextNode(pending ? "Exporting…" : "Export PDF"));
+  button.addEventListener("click", () => {
+    requestPdfExport(model);
+    button.disabled = true;
+    button.lastChild!.textContent = "Exporting…";
+  });
+  return button;
+}
+
 export function renderCurated(container: HTMLElement, model: AnyModel, pickButton?: HTMLElement): void {
   // Remember which composer field had focus (and its caret) so a re-render
   // triggered by new provenance data doesn't also steal the user's cursor.
@@ -204,8 +224,22 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
   const order = document.createElement("span");
   order.className = "pw-list-order";
   order.textContent = "oldest first";
-  header.appendChild(order);
+  order.title = "Annotations are listed in the order they were written";
+  if (mode !== "analyst") header.appendChild(order); // the analyst header has the export button instead
+  if (mode === "analyst") {
+    const exportButton = renderExportButton(model, rows.length);
+    exportButton.style.marginLeft = "auto";
+    header.appendChild(exportButton);
+  }
   container.appendChild(header);
+  const exportError = (model as unknown as TreeNavState)._pwExport?.error;
+  if (mode === "analyst" && exportError) {
+    const message = document.createElement("div");
+    message.className = "pw-export-error";
+    message.setAttribute("role", "alert");
+    message.textContent = exportError;
+    container.appendChild(message);
+  }
 
   const cursor = mode === "reviewer" ? cursorStateId(model, tree) : null;
   const rail = document.createElement("div");
