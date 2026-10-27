@@ -15,6 +15,8 @@ hard dependency on pmprov (see the `pmprov` extra in pyproject.toml).
 
 from __future__ import annotations
 
+import ast
+from collections import OrderedDict
 from typing import Any
 
 from provenance_widget.interfaces import (
@@ -31,6 +33,7 @@ from provenance_widget.interfaces import (
     Tag,
 )
 
+_SNAPSHOT_CACHE_SIZE = 6  # restored artifact versions kept in memory
 _DEFAULT_TAG_COLOR = "#64748B"
 _TITLE_MAX_LEN = 40
 
@@ -68,6 +71,8 @@ class PmprovAdapter:
         # annotation_id -> (state_id, tag names) for annotations persisted
         # through this adapter, so update_annotation() can diff tags.
         self._persisted_tags: dict[str, tuple[str, set[str]]] = {}
+        # artifact_state_id -> restored object, LRU (see snapshot())
+        self._values: OrderedDict[str, Any] = OrderedDict()
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -156,7 +161,7 @@ class PmprovAdapter:
                     command_name=step["func_name"],
                     category=_map_category(op_info.get("category")),
                 ),
-                params={p["param_id"]: p["value"] for p in detail.get("params", [])},
+                params=self._readable_params(detail.get("params", [])),
                 delta=Delta(
                     columns_added=[ColumnAdded(name=c, dtype="") for c in delta_info.get("columns_added", [])],
                     columns_removed=[
@@ -262,13 +267,55 @@ class PmprovAdapter:
             if isinstance(tag, dict) and tag.get("name")
         }
 
+    def _annotation_state(self, annotation_id: str) -> str | None:
+        """The state an annotation is attached to (searched when it was persisted in an earlier session)."""
+        known = self._persisted_tags.get(annotation_id)
+        if known:
+            return known[0]
+        graph = self._rt.storage.load_graph(self._rt._history.history_id)
+        for state in graph["states"]:
+            stored = self._rt.storage.load_annotations("analysis_state", state["state_id"])
+            if any(a["annotation_id"] == annotation_id for a in stored):
+                return state["state_id"]
+        return None
+
+    def _state_tag_names(self, state_id: str) -> set[str]:
+        return {t["name"] for t in self._rt.storage.load_tags("analysis_state", state_id)}
+
     def remove_annotation(self, annotation_id: str) -> None:
-        """Delete a previously persisted annotation from pmprov."""
+        """Delete an annotation from pmprov, together with the tags that belonged to it.
+
+        pmprov tags hang off the state, not the annotation. Within a session the
+        adapter knows which tags an annotation added, and removes those no other
+        annotation on the state still carries. For an annotation persisted in an
+        earlier session that record is gone, so the tags the UI showed on it (the
+        state's tags) are removed only when it was the last annotation on the
+        state; otherwise they stay, since another annotation shows them too.
+        """
+        from models.annotations import AnnotatableType
+
+        state_id = self._annotation_state(annotation_id)
+        owned = self._persisted_tags.get(annotation_id, (None, None))[1]
         self._rt.remove_annotation(annotation_id)
         self._persisted_tags.pop(annotation_id, None)
+        if state_id is None:
+            return
+        remaining = [a["annotation_id"] for a in self._rt.storage.load_annotations("analysis_state", state_id)]
+        if owned is None:
+            stale = self._state_tag_names(state_id) if not remaining else set()
+        elif any(other not in self._persisted_tags for other in remaining):
+            stale = set()  # an annotation of unknown ownership may still need them
+        else:
+            stale = owned - set().union(*(self._persisted_tags[o][1] for o in remaining)) if remaining else owned
+        for name in stale:
+            self._rt.untag(AnnotatableType.ANALYSIS_STATE, state_id, name)
 
     def update_annotation(self, annotation_id: str, annotation_dict: dict) -> None:
-        """Replace an annotation's text and sync its tags in pmprov."""
+        """Replace an annotation's text and sync its tags in pmprov.
+
+        Tags are the state's, so for an annotation from an earlier session the
+        change is made against the tags the UI showed on it (the state's tags).
+        """
         text = annotation_dict.get("note") or annotation_dict.get("title") or ""
         if not text:
             return
@@ -276,12 +323,109 @@ class PmprovAdapter:
         from models.annotations import AnnotatableType
 
         self._rt.update_annotation(annotation_id, text)
-        state_id, old_names = self._persisted_tags.get(annotation_id, (None, set()))
+        state_id = self._annotation_state(annotation_id)
         if state_id is None:
             return
+        known = self._persisted_tags.get(annotation_id)
+        old_names = known[1] if known else self._state_tag_names(state_id)
         new_names = self._tag_names(annotation_dict)
         for name in new_names - old_names:
             self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
         for name in old_names - new_names:
             self._rt.untag(AnnotatableType.ANALYSIS_STATE, state_id, name)
         self._persisted_tags[annotation_id] = (state_id, new_names)
+
+    @staticmethod
+    def _readable_params(raw_params: list[dict]) -> dict:
+        """pmprov's parameter records as plain `name: value`.
+
+        Drops references to input artifacts (the data a step ran on, not a
+        setting) and the "function:" prefix on parameter ids, so the sidebar
+        shows what the analyst chose, e.g. `year = 2008`.
+        """
+        params: dict = {}
+        for record in raw_params:
+            value = record.get("value")
+            if isinstance(value, dict) and "value_type" in value:
+                if value["value_type"] == "artifact_state_ref":
+                    continue
+                value = value.get("value")
+            params[record["param_id"].split(":", 1)[-1]] = value
+        return params
+
+    def _require_bindings(self) -> None:
+        if not hasattr(self._rt.storage, "load_state_bindings"):
+            raise RuntimeError(
+                "Replaying a state needs pmprov >= 0.8.0 (it records which variable was bound to "
+                "which artifact at every state); the installed pmprov is older."
+            )
+
+    @staticmethod
+    def _assigned_name(raw_line: str | None) -> str | None:
+        """Name bound by a single-target ``name = call(...)`` step line."""
+        if not raw_line:
+            return None
+        try:
+            node = ast.parse(raw_line.strip()).body[0]
+        except (SyntaxError, IndexError):
+            return None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            return node.targets[0].id
+        return None
+
+    def _legacy_sources(self, state_id: str) -> dict[str, str]:
+        """For a state recorded before pmprov 0.8 (no bindings): variable name ->
+        output state of the newest step on the path that assigned it.
+
+        A step's own output restores exactly even in old histories, and the
+        namespace at a state is the latest output of each variable along its
+        path, so this is exact (pmprov's old per-state restore was not).
+        """
+        graph = self._rt.storage.load_graph(self._rt._history.history_id)
+        by_output = {s["output_state_id"]: s for s in graph["steps"]}
+        sources: dict[str, str] = {}
+        current = state_id
+        while current in by_output:  # newest first: the first assignment of a name wins
+            step = by_output[current]
+            name = self._assigned_name(step.get("raw_line"))
+            if name and name not in sources:
+                sources[name] = step["output_state_id"]
+            current = step["input_state_id"]
+        return sources
+
+    def snapshot_bindings(self, state_id: str) -> set[str]:
+        """Names of the variables bound at *state_id*, without loading any data."""
+        self.settle()
+        self._require_bindings()
+        bindings = self._rt.storage.load_state_bindings(state_id)
+        return set(bindings) if bindings else set(self._legacy_sources(state_id))
+
+    def snapshot(self, state_id: str, names: list[str] | None = None) -> dict[str, Any]:
+        """The variables bound at *state_id*, exactly as they were (all, or just *names*).
+
+        Names that are not bound there, or whose value pmprov could not load,
+        are simply absent. Loaded values are cached by artifact version, so a
+        frame that many states share (the raw event log) is read once. Treat
+        the returned objects as read-only: they are shared with the cache.
+        """
+        self.settle()
+        self._require_bindings()
+        bindings = self._rt.storage.load_state_bindings(state_id)
+        legacy = {} if bindings else self._legacy_sources(state_id)
+        known = bindings or legacy
+        wanted = list(known) if names is None else [n for n in names if n in known]
+        variables: dict[str, Any] = {}
+        for name in wanted:
+            version = bindings[name] if bindings else f"{legacy[name]}:{name}"
+            if version in self._values:
+                self._values.move_to_end(version)
+                variables[name] = self._values[version]
+                continue
+            source_state = state_id if bindings else legacy[name]
+            value = self._rt.restore_state(source_state, names=[name]).variables.get(name)
+            if value is not None:
+                self._values[version] = value
+                variables[name] = value
+        while len(self._values) > _SNAPSHOT_CACHE_SIZE:
+            self._values.popitem(last=False)
+        return variables
