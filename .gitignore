@@ -9,3 +9,6 @@ __marimo__/
 docs/
 project/
 examples/data/
+
+# recorded example sessions (databases and artifacts)
+examples/marimo/
