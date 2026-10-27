@@ -9,6 +9,8 @@ export interface TreeNavState {
   _pwTreePath?: string[];
   // reviewer replay: parent stateId -> child last stepped back from (for redo)
   _pwForward?: Record<string, string>;
+  // annotation composer draft, so a re-render never loses what is being typed
+  _pwDraft?: { note: string; tags: string };
 }
 
 export function getActivePath(model: unknown): string[] | null {

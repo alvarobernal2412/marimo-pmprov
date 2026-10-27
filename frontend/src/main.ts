@@ -215,6 +215,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     if (treePortal.style.display !== "none") positionTreePortal();
   });
 
+  // Auto-refreshing sources push the tree every poll even when nothing
+  // changed; rebuilding the whole sidebar for that destroys in-progress input
+  // (e.g. a half-typed annotation), so only re-render when the tree differs.
+  let lastTreeSignature = JSON.stringify(model.get("tree"));
+
   renderTabs();
   renderRestoreBanner();
   renderBody();
@@ -227,7 +232,12 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     renderBody();
     renderRestoreBanner();
   });
-  model.on("change:tree", renderBody);
+  model.on("change:tree", () => {
+    const signature = JSON.stringify(model.get("tree"));
+    if (signature === lastTreeSignature) return;
+    lastTreeSignature = signature;
+    renderBody();
+  });
   model.on("change:commits", renderBody);
   model.on("change:removed_annotations", renderBody);
   model.on("change:edited_annotations", renderBody);
