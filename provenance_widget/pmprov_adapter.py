@@ -16,6 +16,7 @@ hard dependency on pmprov (see the `pmprov` extra in pyproject.toml).
 from __future__ import annotations
 
 import ast
+import threading
 from collections import OrderedDict
 from typing import Any
 
@@ -73,6 +74,15 @@ class PmprovAdapter:
         self._persisted_tags: dict[str, tuple[str, set[str]]] = {}
         # artifact_state_id -> restored object, LRU (see snapshot())
         self._values: OrderedDict[str, Any] = OrderedDict()
+        # A recorded state never changes, so its node is built once. Rebuilding every node on every refresh
+        # re-read each state from the database (a connection each) and, past a few hundred states, took longer
+        # than the panel's poll interval, which kept a core busy and starved the notebook. Only a state's
+        # annotations can change, so those are reloaded for the states marked dirty.
+        self._nodes: dict[str, ProvenanceNode] = {}
+        self._branch_names: dict[str, str] = {}
+        self._dirty_annotations: set[str] = set()
+        self._all_annotations_dirty = False
+        self._tree_lock = threading.RLock()
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -91,6 +101,16 @@ class PmprovAdapter:
         self._rt.storage._executor.submit(lambda: None).result()
 
     def get_tree(self) -> ProvenanceTree:
+        with self._tree_lock:
+            return self._build_tree()
+
+    def _mark_annotations_dirty(self, state_id: str | None) -> None:
+        if state_id is None:
+            self._all_annotations_dirty = True
+        else:
+            self._dirty_annotations.add(state_id)
+
+    def _build_tree(self) -> ProvenanceTree:
         self.settle()
         history_id = self._rt._history.history_id
         graph = self._rt.storage.load_graph(history_id)
@@ -132,11 +152,25 @@ class PmprovAdapter:
             if state is None:
                 continue
 
+            cached = self._nodes.get(output_id)
+            if cached is not None:
+                if self._all_annotations_dirty or output_id in self._dirty_annotations:
+                    cached.annotations = self._load_annotations(output_id)
+                nodes[output_id] = cached
+                running_rows[output_id] = cached.delta.row_count_after
+                branches.setdefault(
+                    state["branch_id"], self._branch_names.get(state["branch_id"], state["branch_id"])
+                )
+                if cached.parent_state_id is None and display_root_id is None:
+                    display_root_id = output_id
+                continue
+
             detail = self._rt.storage.load_state_detail(output_id)
             op_info = detail.get("operation") or {}
             delta_info = detail.get("delta") or {}
             branch_name = detail.get("branch_name") or state["branch_id"]
             branches.setdefault(state["branch_id"], branch_name)
+            self._branch_names[state["branch_id"]] = branch_name
 
             parent_id = step["input_state_id"]
             is_first_real_step = parent_id == tracker_root_id
@@ -150,7 +184,7 @@ class PmprovAdapter:
             rows_after = rows_before + (delta_info.get("rows_delta") or 0)
             running_rows[output_id] = rows_after
 
-            nodes[output_id] = ProvenanceNode(
+            nodes[output_id] = self._nodes[output_id] = ProvenanceNode(
                 state_id=output_id,
                 parent_state_id=parent_id,
                 branch_id=state["branch_id"],
@@ -173,6 +207,8 @@ class PmprovAdapter:
                 annotations=self._load_annotations(output_id),
             )
 
+        self._dirty_annotations.clear()
+        self._all_annotations_dirty = False
         return ProvenanceTree(nodes=nodes, root_id=display_root_id or "", branches=branches)
 
     def state_for_artifact(self, artifact_id: str) -> str | None:
@@ -280,6 +316,7 @@ class PmprovAdapter:
         for name in names:
             self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
         self._persisted_tags[annotation_id] = (state_id, names)
+        self._mark_annotations_dirty(state_id)
         return annotation_id
 
     @staticmethod
@@ -321,6 +358,7 @@ class PmprovAdapter:
         owned = self._persisted_tags.get(annotation_id, (None, None))[1]
         self._rt.remove_annotation(annotation_id)
         self._persisted_tags.pop(annotation_id, None)
+        self._mark_annotations_dirty(state_id)
         if state_id is None:
             return
         remaining = [a["annotation_id"] for a in self._rt.storage.load_annotations("analysis_state", state_id)]
@@ -347,6 +385,7 @@ class PmprovAdapter:
 
         self._rt.update_annotation(annotation_id, text)
         state_id = self._annotation_state(annotation_id)
+        self._mark_annotations_dirty(state_id)
         if state_id is None:
             return
         known = self._persisted_tags.get(annotation_id)

@@ -96,8 +96,11 @@ class ProvenancePanel:
         # "config" was a tab in earlier versions; it no longer exists.
         visible_tabs = [t for t in tabs if t != "config"] if tabs is not None else ["curated", "tree"]
         active_tab = visible_tabs[0] if visible_tabs else "curated"
+        # A live source's first tree can take a while to read (every recorded state is read once), so with
+        # auto-refresh on it is built by the poll thread instead of here, where it would hold up the notebook.
+        build_in_background = auto_refresh and hasattr(self._source, "settle")
         self.widget = ProvenanceWidget(
-            tree=tree_to_json(self._source.get_tree()),
+            tree=tree_to_json(EmptyProvenanceSource().get_tree() if build_in_background else self._source.get_tree()),
             mode=mode,
             visible_tabs=visible_tabs,
             active_tab=active_tab,
@@ -141,11 +144,12 @@ class ProvenancePanel:
         self._auto_refresh_stop = stop
 
         def poll() -> None:
-            while not stop.wait(_AUTO_REFRESH_INTERVAL_SECONDS):
+            while not stop.is_set():
                 try:
                     self.refresh()
                 except Exception:
                     pass  # widget/comm may already be closed (kernel shutdown, cell re-run)
+                stop.wait(_AUTO_REFRESH_INTERVAL_SECONDS)
 
         threading.Thread(target=poll, daemon=True).start()
 
@@ -194,11 +198,15 @@ class ProvenancePanel:
         manually too, e.g. to force an immediate update instead of waiting
         for the next poll.
         """
-        self.widget.tree = tree_to_json(self._source.get_tree())
-        # Belt-and-braces: under marimo (unlike Jupyter), a Dict trait set
-        # from a cell that isn't itself re-running doesn't reliably push a
-        # fresh sync message to an already-displayed widget — force one.
-        self.widget.send_state(["tree"])
+        tree = tree_to_json(self._source.get_tree())
+        # Only push when something changed: the poll runs every few hundred milliseconds, and re-sending an
+        # unchanged tree of hundreds of states each time costs the notebook more than it costs the browser.
+        if tree != self.widget.tree:
+            self.widget.tree = tree
+            # Belt-and-braces: under marimo (unlike Jupyter), a Dict trait set
+            # from a cell that isn't itself re-running doesn't reliably push a
+            # fresh sync message to an already-displayed widget — force one.
+            self.widget.send_state(["tree"])
         self._persist_pending()
 
     def _on_commits_changed(self, change: dict) -> None:
@@ -324,7 +332,13 @@ class ProvenancePanel:
         request = change["new"] or {}
         if not request.get("requestId") or self._mode != "analyst":
             return
-        result: dict = {"requestId": request["requestId"]}
+        # Reading the recorded outputs waits for the source's storage queue, so, like the annotation writes, the
+        # export runs on the background worker for a live source (after the writes already queued) instead of
+        # on marimo's kernel thread, where it froze every other UI element until the queue drained.
+        self._run_write(self._export_and_publish, request["requestId"])
+
+    def _export_and_publish(self, request_id: str) -> None:
+        result: dict = {"requestId": request_id}
         try:
             data = self.export_pdf()
             result["filename"] = re.sub(r"[^\w.-]+", "_", self._report_title).strip("_").lower() + ".pdf"

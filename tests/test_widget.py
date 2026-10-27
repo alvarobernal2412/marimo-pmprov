@@ -434,3 +434,63 @@ def test_writes_to_a_live_source_keep_their_order():
     panel.wait_for_persistence(timeout=10)
 
     assert source.order == ["add:first", "edit:second"]
+
+
+def test_refresh_does_not_resend_an_unchanged_tree():
+    sent = []
+    panel = ProvenancePanel(source=MockProvenanceSource(), auto_refresh=False)
+    panel.widget.send_state = lambda keys=None: sent.append(keys)
+
+    panel.refresh()
+    panel.refresh()
+
+    assert sent == []  # nothing changed since the panel was built
+
+
+def test_the_first_tree_of_a_live_source_is_not_read_on_the_callers_thread():
+    import threading
+    import time
+
+    reads: list[str] = []
+
+    class _Live(MockProvenanceSource):
+        def settle(self):  # marks it as a live source
+            pass
+
+        def get_tree(self):
+            reads.append(threading.current_thread().name)
+            return super().get_tree()
+
+    panel = ProvenancePanel(source=_Live(), auto_refresh=True)
+    try:
+        assert threading.current_thread().name not in reads  # the constructor did not read it
+        deadline = time.monotonic() + 5
+        while not panel.widget.tree.get("nodes") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert panel.widget.tree.get("nodes")  # the poll thread filled it in
+        assert threading.current_thread().name not in reads
+    finally:
+        panel.stop_auto_refresh()
+
+
+def test_pdf_export_from_a_live_source_does_not_hold_up_the_caller():
+    import threading
+    import time
+
+    class _Live(MockProvenanceSource):
+        def settle(self):  # marks it as a live source
+            pass
+
+    panel = ProvenancePanel(source=_Live(), auto_refresh=False)
+    gate = threading.Event()
+    original = panel.export_pdf
+    panel.export_pdf = lambda *a, **k: (gate.wait(10), original(*a, **k))[1]
+
+    began = time.monotonic()
+    panel.widget.export_request = {"requestId": "r1"}
+    assert time.monotonic() - began < 1  # returned although the export is still waiting
+    assert panel.widget.export_result == {}
+
+    gate.set()
+    panel.wait_for_persistence(timeout=20)
+    assert panel.widget.export_result.get("requestId") == "r1"

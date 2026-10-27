@@ -291,3 +291,41 @@ def test_sidebar_note_made_before_the_first_step_ends_up_in_pmprov(rt, event_log
 
     annotations = adapter.get_tree().nodes[rt._current_state_id].annotations
     assert [a.note for a in annotations] == ["typed early"]
+
+
+def test_a_state_is_read_from_storage_once_not_on_every_refresh(rt, event_log):
+    """Reading every state on every poll kept the notebook's CPU busy once a history grew to hundreds of states."""
+    for i in range(3):
+        rt.trace_step(func=lambda df: df.assign(x=1), func_name="f", raw_line="df=f(df)",
+                      args=[event_log], kwargs={})
+    _settle(rt)
+    adapter = PmprovAdapter(rt)
+    calls = []
+    real = rt.storage.load_state_detail
+    rt.storage.load_state_detail = lambda state_id: (calls.append(state_id), real(state_id))[1]
+
+    first = adapter.get_tree()
+    reads_after_first = len(calls)
+    second = adapter.get_tree()
+
+    assert reads_after_first == len(first.nodes) == 3
+    assert len(calls) == reads_after_first  # the second tree came from the cache
+    assert list(second.nodes) == list(first.nodes)
+
+
+def test_a_cached_tree_still_shows_annotations_added_edited_and_removed_later(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="f", raw_line="df=f(df)",
+                  args=[event_log], kwargs={})
+    _settle(rt)
+    state_id = rt._current_state_id
+    adapter = PmprovAdapter(rt)
+    assert adapter.get_tree().nodes[state_id].annotations == []
+
+    annotation_id = adapter.persist_annotation(state_id, {"note": "first"})
+    assert [a.note for a in adapter.get_tree().nodes[state_id].annotations] == ["first"]
+
+    adapter.update_annotation(annotation_id, {"note": "second"})
+    assert [a.note for a in adapter.get_tree().nodes[state_id].annotations] == ["second"]
+
+    adapter.remove_annotation(annotation_id)
+    assert adapter.get_tree().nodes[state_id].annotations == []
