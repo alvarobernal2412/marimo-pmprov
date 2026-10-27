@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2
+
+### Fixed
+- Saving, editing or removing an annotation in the sidebar no longer freezes the notebook. With a live pmprov
+  history the save waited, on marimo's kernel thread, for pmprov's storage queue (which can hold minutes of
+  artifact writes), so every other UI element (dropdowns, sliders, the PDF export) stopped responding until it
+  drained. These writes now run, in order, on a background worker for live sources. Fixed sources are unchanged.
+
+### Added
+- `ProvenancePanel.wait_for_persistence(timeout=None)` blocks until the queued annotation writes have reached the
+  source, for scripts and tests.
+
 ## 0.2.1
 
 ### Fixed
