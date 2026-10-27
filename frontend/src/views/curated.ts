@@ -4,6 +4,7 @@ import { annotationCard } from "../components/annotation-card";
 import { collectAnnotations } from "../annotations";
 import { cursorStateId, moveCursor } from "../replay";
 import { renderReplayBar } from "./replay-bar";
+import type { TreeNavState } from "../nav-state";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -51,12 +52,19 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
 
   composer.appendChild(renderTargetSelector(model));
 
+  const nav = model as unknown as TreeNavState;
+  const draft = (nav._pwDraft ??= { note: "", tags: "" });
+
   const noteField = document.createElement("textarea");
   noteField.placeholder = "Describe reasoning for this analytical step...";
+  noteField.value = draft.note;
+  noteField.addEventListener("input", () => (draft.note = noteField.value));
   composer.appendChild(noteField);
 
   const tagField = document.createElement("input");
   tagField.placeholder = "#tags";
+  tagField.value = draft.tags;
+  tagField.addEventListener("input", () => (draft.tags = tagField.value));
   composer.appendChild(tagField);
 
   const commitBtn = document.createElement("button");
@@ -93,10 +101,15 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
     const stateId = targetArtifactId && tree.nodes[targetArtifactId] ? targetArtifactId : "composer";
 
     const existing = model.get("commits") as unknown[];
-    model.set("commits", [...existing, { stateId, annotation: newAnnotation }]);
-    model.save_changes();
+    // Clear the draft first: setting "commits" re-renders the sidebar
+    // synchronously, and the fresh composer would otherwise reload the old text.
     noteField.value = "";
     tagField.value = "";
+    draft.note = "";
+    draft.tags = "";
+
+    model.set("commits", [...existing, { stateId, annotation: newAnnotation }]);
+    model.save_changes();
   });
   composer.appendChild(commitBtn);
 
@@ -104,6 +117,12 @@ function renderComposer(container: HTMLElement, model: AnyModel): HTMLElement {
 }
 
 export function renderCurated(container: HTMLElement, model: AnyModel): void {
+  // Remember which composer field had focus (and its caret) so a re-render
+  // triggered by new provenance data doesn't also steal the user's cursor.
+  const active = (container.getRootNode() as Document | ShadowRoot).activeElement;
+  const focusedField = active?.closest(".pw-composer")
+    ? { tag: active.tagName, start: (active as HTMLTextAreaElement).selectionStart, end: (active as HTMLTextAreaElement).selectionEnd }
+    : null;
   container.innerHTML = "";
   const tree = model.get("tree") as ProvenanceTreeJson;
   const mode = model.get("mode") as string;
@@ -141,5 +160,12 @@ export function renderCurated(container: HTMLElement, model: AnyModel): void {
 
   if (mode === "student") {
     container.appendChild(renderComposer(container, model));
+    if (focusedField) {
+      const field = container.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+        `.pw-composer ${focusedField.tag.toLowerCase()}`,
+      );
+      field?.focus();
+      if (focusedField.start !== null) field?.setSelectionRange(focusedField.start, focusedField.end);
+    }
   }
 }
