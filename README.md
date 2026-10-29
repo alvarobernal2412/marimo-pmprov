@@ -205,6 +205,13 @@ instead of mock data:
    ```
 3. Pass your adapter instead of `MockProvenanceSource` to `ProvenancePanel`.
 
+## Moving a stored history to another machine
+
+A pmprov history is a folder (`provenance.db` plus `artifacts/`) and can be downloaded from a hosted notebook such as molab
+and opened locally. pmprov stores the absolute path of every artifact file, so a copied folder points at the old machine's
+folders: the tree and the notes open, but maps and tables cannot be restored until the stored paths are re-pointed.
+[guides/portable-provenance.md](guides/portable-provenance.md) explains the problem, gives the short fix and lists the steps.
+
 ## Development
 
 ```bash

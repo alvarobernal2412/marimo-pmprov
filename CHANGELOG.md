@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `guides/portable-provenance.md`: moving a stored history to another machine (for example from molab to a laptop), why the
+  stored artifact paths break the restore of maps and tables, and the short fix.
+
 ## 0.2.4
 
 ### Fixed
