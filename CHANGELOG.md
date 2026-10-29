@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Apache License 2.0 (`LICENSE`, and `license` in the package metadata).
 - `guides/portable-provenance.md`: moving a stored history to another machine (for example from molab to a laptop), why the
   stored artifact paths break the restore of maps and tables, and the short fix.
 

@@ -222,3 +222,8 @@ cd frontend
 npm install
 npm run build   # or: npm run watch
 ```
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE). The Source Sans fonts bundled for the PDF export keep their own license
+(SIL Open Font License), see [provenance_widget/fonts/LICENSE.txt](provenance_widget/fonts/LICENSE.txt).
