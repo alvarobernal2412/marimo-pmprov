@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.4
+
+### Fixed
+- The exported PDF draws what the analyst picked. A target now carries a snapshot of the element it was picked on,
+  and the report draws that snapshot instead of looking a variable up at the recorded step, which returned an
+  unrelated table for tables built inside a display cell.
+- "Export PDF" with a live source no longer waits for the source's storage queue. It builds the report from what
+  the sidebar holds, on its own thread, so it finishes in seconds while a long history is still being written.
+- The target of a picked table cell or column names the column ("column Attribute") instead of running the column's
+  name into its type and distinct count.
+
+### Added
+- `show(element, artifact_id, artifact_name, value=...)` makes any element pickable. Snapshots have a `kind`:
+  a table (its head, as shown), text, or an image (matplotlib, Altair, Plotly and PIL figures). `show_chart` takes
+  the underlying `figure` so a picked chart is drawn as an image.
+- `export_pdf(include_authors=False, include_settings=False)`: the report no longer lists the author or the
+  step's settings unless asked to, and prints only short scalar settings of the step itself.
+
+### Changed
+- Step labels in the report read as words and are cut at the first bracket or parenthesis and at 40 characters
+  (a chained call used to print whole).
+
 ## 0.2.3
 
 ### Fixed

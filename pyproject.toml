@@ -1,6 +1,6 @@
 [project]
 name = "marimo-pmprov"
-version = "0.2.3"
+version = "0.2.4"
 description = "A marimo anywidget for analytic provenance, annotation and replay on top of pmprov."
 requires-python = ">=3.11"
 dependencies = [
