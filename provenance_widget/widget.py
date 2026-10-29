@@ -120,6 +120,7 @@ class ProvenancePanel:
             else None
         )
         self._write_futures: list[concurrent.futures.Future] = []
+        self._export_threads: list[threading.Thread] = []
         # frontend annotation id -> id the source assigned when persisting it
         self._source_ids: dict[str, str] = {}
         self._handled_removals: set[str] = set()
@@ -186,6 +187,8 @@ class ProvenancePanel:
     def wait_for_persistence(self, timeout: float | None = None) -> None:
         """Block until every annotation write queued so far has reached the source (for scripts and tests)."""
         concurrent.futures.wait(list(self._write_futures), timeout=timeout)
+        for thread in list(self._export_threads):
+            thread.join(timeout)
 
     def refresh(self) -> None:
         """Re-pull the tree from the source.
@@ -332,10 +335,19 @@ class ProvenancePanel:
         request = change["new"] or {}
         if not request.get("requestId") or self._mode != "analyst":
             return
-        # Reading the recorded outputs waits for the source's storage queue, so, like the annotation writes, the
-        # export runs on the background worker for a live source (after the writes already queued) instead of
-        # on marimo's kernel thread, where it froze every other UI element until the queue drained.
-        self._run_write(self._export_and_publish, request["requestId"])
+        # The report is built from what the sidebar already holds (the notes, the tree and the snapshot each picked
+        # target carries), so it does not wait for the source's storage queue: with a live pmprov history that
+        # queue can hold tens of minutes of writes, and the annotation writes ahead of it wait for it too. It runs
+        # off marimo's kernel thread so the export does not freeze the other UI elements either.
+        if self._writes is None:
+            self._export_and_publish(request["requestId"])
+            return
+        thread = threading.Thread(
+            target=self._export_and_publish, args=(request["requestId"],), name="pw-export", daemon=True
+        )
+        self._export_threads = [t for t in self._export_threads if t.is_alive()]
+        self._export_threads.append(thread)
+        thread.start()
 
     def _export_and_publish(self, request_id: str) -> None:
         result: dict = {"requestId": request_id}
@@ -347,7 +359,10 @@ class ProvenancePanel:
             result["error"] = str(exc) or type(exc).__name__
         self.widget.export_result = result
 
-    def export_pdf(self, path: str | pathlib.Path | None = None, title: str | None = None) -> bytes:
+    def export_pdf(
+        self, path: str | pathlib.Path | None = None, title: str | None = None,
+        include_authors: bool = False, include_settings: bool = False,
+    ) -> bytes:
         """The annotation history as an academic-style PDF (needs the ``pdf`` extra).
 
         Annotations come in time order, each with its tags, the step number and
@@ -370,6 +385,8 @@ class ProvenancePanel:
             self._artifact_value,
             title=title or self._report_title,
             stores_outputs=hasattr(self._source, "snapshot"),
+            include_authors=include_authors,
+            include_settings=include_settings,
         )
         if path is not None:
             pathlib.Path(path).write_bytes(data)

@@ -33,6 +33,18 @@ function inPath(path: EventTarget[], candidate: Element | null): boolean {
   return candidate !== null && path.includes(candidate);
 }
 
+// A table header cell's name: the first piece of text in it. marimo's header also holds the dtype and the
+// distinct-value count under the name, which would otherwise run into it ("Attributestrunique: 12").
+function headerName(cell: Element | null | undefined): string | null {
+  if (!cell) return null;
+  const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent?.trim();
+    if (text) return text;
+  }
+  return cell.textContent?.trim() ?? null;
+}
+
 // Built in: plain HTML tables (mo.ui.table renders one inside its shadow
 // root — composedPath is what lets us see it at all, see picker.ts).
 registerDetailResolver({
@@ -46,7 +58,7 @@ registerDetailResolver({
       let columnName: string | null = null;
       if (table && colIndex >= 0) {
         const headerCell = table.querySelector("thead tr")?.children[colIndex];
-        columnName = headerCell?.textContent?.trim() ?? null;
+        columnName = headerName(headerCell);
       }
       const tbody = tr?.parentElement;
       const rowIndex = tr && tbody ? Array.from(tbody.children).indexOf(tr) : -1;
@@ -56,7 +68,7 @@ registerDetailResolver({
 
     const th = clickTarget.closest("th");
     if (th && inPath(path, th)) {
-      return { granularity: "column", detail: th.textContent?.trim() ?? null };
+      return { granularity: "column", detail: headerName(th) };
     }
 
     return null;

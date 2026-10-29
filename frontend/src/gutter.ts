@@ -4,11 +4,14 @@ interface AnyModel {
   save_changes(): void;
 }
 
+import { readSnapshot } from "./picker";
+
 interface PickedSelection {
   artifactId: string;
   artifactName: string;
   granularity: string;
   detail: string | null;
+  snapshot?: unknown;
 }
 
 function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
@@ -60,6 +63,7 @@ export function armGutterAffordance(
         artifactName: currentTarget.dataset.pwArtifactName ?? "",
         granularity,
         detail,
+        snapshot: readSnapshot(currentTarget),
       });
       hideButton();
     });

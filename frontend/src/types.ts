@@ -11,6 +11,9 @@ export interface ArtifactRefJson {
   artifactName: string;
   granularity: string;
   detail: string | null;
+  // the head of the picked table as it was shown (see display.show_table), drawn in the exported report
+  // kind "table": columns/rows/total_*; "text": text; "image": png (base64). Built by provenance_widget/element_snapshot.py
+  snapshot?: { kind?: "table" | "text" | "image"; [field: string]: unknown } | null;
 }
 
 export interface TagJson {

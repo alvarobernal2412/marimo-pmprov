@@ -11,6 +11,17 @@ interface PickedSelection {
   artifactName: string;
   granularity: string;
   detail: string | null;
+  snapshot?: unknown;
+}
+
+export function readSnapshot(element: HTMLElement): unknown {
+  const raw = element.dataset.pwSnapshot;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
@@ -80,6 +91,7 @@ export function armPicker(
       artifactName: target.dataset.pwArtifactName ?? "",
       granularity,
       detail,
+      snapshot: readSnapshot(target),
     });
   }
 

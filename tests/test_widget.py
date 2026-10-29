@@ -494,3 +494,28 @@ def test_pdf_export_from_a_live_source_does_not_hold_up_the_caller():
     gate.set()
     panel.wait_for_persistence(timeout=20)
     assert panel.widget.export_result.get("requestId") == "r1"
+
+
+def test_pdf_export_does_not_wait_for_the_source_storage_queue():
+    import threading
+
+    class _Live(MockProvenanceSource):
+        def settle(self):  # marks it as a live source
+            pass
+
+    panel = ProvenancePanel(source=_Live(), auto_refresh=False)
+    blocked = threading.Event()
+    panel._run_write(lambda: blocked.wait(30))  # a write stuck behind the source's backlog
+
+    panel.widget.export_request = {"requestId": "r2"}
+    deadline = threading.Event()
+    for _ in range(100):
+        if panel.widget.export_result.get("requestId") == "r2":
+            break
+        deadline.wait(0.1)
+    try:
+        assert panel.widget.export_result.get("requestId") == "r2"  # finished although the write has not
+        assert not blocked.is_set()
+    finally:
+        blocked.set()
+        panel.wait_for_persistence(timeout=20)

@@ -58,6 +58,7 @@ def test_rows_are_ordered_by_time_with_step_numbers_and_settings():
     assert [r.annotation["title"] for r in rows] == ["early", "late"]
     assert [(r.step, r.operation) for r in rows] == [(2, "filter"), (3, "group")]
     assert rows[1].params == {"year": 2020}  # settings chosen earlier stay in force
+    assert [r.own_params for r in rows] == [{"year": 2020}, {}]  # the report prints only the step's own
 
 
 def test_rows_apply_removals_edits_and_hide_the_stored_copy_of_a_commit():
@@ -82,7 +83,7 @@ def test_pdf_has_annotation_tags_target_step_and_table_caption():
     pdf = build_pdf(rows, lambda row, ref: frame, compress=False)
     assert pdf.startswith(b"%PDF")
     text = text_of(pdf)
-    for expected in ("Unusual peak", "#urgent", "Step 2: filter", "Target by_activity", "Table 1. by_activity at step 2", "year = 2020", "first 3 of 3 rows"):
+    for expected in ("Unusual peak", "#urgent", "Step 2: filter", "Target by_activity", "Table 1. by_activity at step 2", "first 3 of 3 rows"):
         assert expected in text, expected
 
 
@@ -172,7 +173,83 @@ def test_author_is_listed_per_entry_only_with_several_authors():
         ]
         return collect_rows(TREE, commits, [], {}, {})
 
-    one = text_of(build_pdf(rows_by("Alice", "Alice"), None, compress=False))
+    one = text_of(build_pdf(rows_by("Alice", "Alice"), None, compress=False, include_authors=True))
     assert one.count("Alice") == 1  # byline only
-    two = text_of(build_pdf(rows_by("Alice", "Bob"), None, compress=False))
+    two = text_of(build_pdf(rows_by("Alice", "Bob"), None, compress=False, include_authors=True))
     assert two.count("Alice") == 2 and two.count("Bob") == 2
+
+
+def test_a_picked_table_is_drawn_from_its_snapshot_not_from_the_state_it_was_recorded_at():
+    """A table built inside a display cell is bound to no step; what the analyst picked is what the report shows."""
+    stored_for_the_step = pd.DataFrame({"unrelated": ["event log row"]})
+    ref = {
+        "artifactId": "s2", "artifactName": "schema_usages", "granularity": "dataset", "detail": "row 1",
+        "snapshot": {"columns": ["activity", "incidence"], "rows": [["A_Create", "1538"], ["O_Create", "2082"]],
+                     "total_rows": 24, "total_columns": 3},
+    }
+    rows = collect_rows(
+        TREE, [{"stateId": "s2", "annotation": _annotation("a", "Schemas", "2026-01-01T10:00:00Z", artifacts=[ref])}],
+        [], {}, {},
+    )
+    text = text_of(build_pdf(rows, lambda row, ref: stored_for_the_step, compress=False))
+    assert "A_Create" in text and "2082" in text
+    assert "event log row" not in text
+    assert "first 2 of 24 rows" in text
+
+
+def _picked(snapshot):
+    ref = {"artifactId": "s2", "artifactName": "picked", "granularity": "dataset", "detail": None, "snapshot": snapshot}
+    return collect_rows(
+        TREE, [{"stateId": "s2", "annotation": _annotation("a", "note", "2026-01-01T10:00:00Z", artifacts=[ref])}],
+        [], {}, {},
+    )
+
+
+def test_a_picked_text_is_drawn_as_text():
+    rows = _picked({"kind": "text", "text": "median requested amount: 12000"})
+    text = text_of(build_pdf(rows, lambda row, ref: pd.DataFrame({"unrelated": [1]}), compress=False))
+    assert "median requested amount: 12000" in text and "Text 1." in text
+
+
+def test_a_picked_image_is_drawn_as_a_figure():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    from provenance_widget.element_snapshot import snapshot_of
+
+    figure, axis = plt.subplots()
+    axis.plot([1, 2, 3])
+    rows = _picked(snapshot_of(figure))
+    plt.close(figure)
+    text = text_of(build_pdf(rows, None, compress=False))
+    assert "Figure 1." in text
+
+
+def test_authors_are_left_out_unless_asked_for():
+    rows = collect_rows(TREE, [{"stateId": "s2", "annotation": _annotation("a", "x", "2026-01-01T10:00:00Z")}], [], {}, {})
+    assert "A ·" not in text_of(build_pdf(rows, None, compress=False)).split("Annotations", 1)[0]
+
+
+def test_settings_keep_short_scalars_and_drop_data_arguments():
+    from provenance_widget.export_pdf import _operation_label, _readable_settings
+
+    noisy = {
+        "unit": "D", "case_count": 1500, "full_width": True, "frames": {"_cell_TXez_filtered_log": "<DataFrame 49x22>"},
+        "data": "[{'rel_log_time': '49'...", "columns": ["a", "b"], "__receiver__": "x", "window_start": "2016-01-01 09:51:15+00:00",
+        "iterable": "...te files', 'W_Handle leads',", "on_apply": None,
+    }
+    assert _readable_settings(noisy) == [
+        ("unit", "D"), ("case count", "1500"), ("full width", "True"), ("window start", "2016-01-01 09:51:15+00:00"),
+    ]
+    assert _operation_label("_cell_TXez_filtered_log") == "filtered log"
+    assert _operation_label("filter") == "filter"
+    assert _operation_label("set_summary[['a', 'b']].sort_values(['a'], ascending=False).reset_index") == "set summary"
+    assert _operation_label("x" * 60) == "x" * 39 + "…"
+
+
+def test_settings_are_printed_only_when_asked_for():
+    rows = collect_rows(TREE, [{"stateId": "s2", "annotation": _annotation("a", "x", "2026-01-01T10:00:00Z")}], [], {}, {})
+    assert "year = 2020" not in text_of(build_pdf(rows, None, compress=False))
+    assert "year = 2020" in text_of(build_pdf(rows, None, compress=False, include_settings=True))

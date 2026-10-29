@@ -1,4 +1,4 @@
-import type { AnnotationJson, ProvenanceTreeJson } from "../types";
+import type { AnnotationJson, ArtifactRefJson, ProvenanceTreeJson } from "../types";
 import { GRANULARITY_LABEL } from "../components/artifact-badge";
 import { annotationCard } from "../components/annotation-card";
 import { collectAnnotations } from "../annotations";
@@ -132,6 +132,7 @@ function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement 
             artifactName: String(selection.artifactName ?? ""),
             granularity: String(selection.granularity ?? "dataset"),
             detail: (selection.detail as string) ?? null,
+            snapshot: (selection.snapshot as ArtifactRefJson["snapshot"]) ?? null,
           }]
         : [],
       author: { agent_id: "agent-analyst", agent_type: "human", display_name: "A" },

@@ -8,12 +8,16 @@ for a DataFrame, an image for a matplotlib / Altair / Plotly figure.
 """
 from __future__ import annotations
 
+import base64
 import io
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
 from xml.sax.saxutils import escape
+
+from .element_snapshot import figure_png
 
 _FONT_DIR = Path(__file__).parent / "fonts"
 _FONT = "PWSans"
@@ -35,6 +39,7 @@ class Row:
     step: int | None = None
     operation: str | None = None
     params: dict = field(default_factory=dict)
+    own_params: dict = field(default_factory=dict)  # what this step itself was called with
 
 
 def _time_of(timestamp: str) -> float:
@@ -99,6 +104,7 @@ def _row(state_id: str, annotation: dict, nodes: dict) -> Row:
         step=len(path) or None,
         operation=(node or {}).get("operation", {}).get("name"),
         params=params,
+        own_params=dict((node or {}).get("params") or {}),
     )
 
 
@@ -156,28 +162,7 @@ def _image(png: bytes, width: float):
     return Image(io.BytesIO(png), width=drawn_w, height=drawn_w * pixel_h / pixel_w, hAlign="LEFT")
 
 
-def _figure_png(obj: Any) -> bytes | None:
-    """PNG bytes for a matplotlib, Altair, Plotly or PIL figure, else None."""
-    module = type(obj).__module__
-    try:
-        if module.startswith("matplotlib"):
-            figure = obj if hasattr(obj, "savefig") else getattr(obj, "figure", None) or obj.get_figure()
-            buffer = io.BytesIO()
-            figure.savefig(buffer, format="png", dpi=200, bbox_inches="tight")
-            return buffer.getvalue()
-        if module.startswith("altair"):
-            import vl_convert
-
-            return vl_convert.vegalite_to_png(obj.to_dict(), scale=2)
-        if module.startswith("plotly"):
-            return obj.to_image(format="png", scale=2)  # needs the kaleido package
-        if module.startswith("PIL"):
-            buffer = io.BytesIO()
-            obj.save(buffer, format="PNG")
-            return buffer.getvalue()
-    except Exception:
-        return None
-    return None
+_figure_png = figure_png
 
 
 def _format_cell(value: Any) -> str | None:
@@ -193,6 +178,18 @@ def _format_cell(value: Any) -> str | None:
     return text if len(text) <= _MAX_CELL_CHARS else text[: _MAX_CELL_CHARS - 1] + "..."
 
 
+def _looks_numeric(column: Any) -> bool:
+    values = [v for v in column if v not in ("", None)]
+    if not values:
+        return False
+    try:
+        for value in values:
+            float(str(value).replace(",", ""))
+    except ValueError:
+        return False
+    return True
+
+
 def _table(frame: Any, width: float, styles: dict):
     """The first rows of a DataFrame laid out like a marimo table; returns (flowable, caption detail).
 
@@ -203,13 +200,21 @@ def _table(frame: Any, width: float, styles: dict):
     from reportlab.platypus import Paragraph, Table, TableStyle
 
     total_rows, total_columns = frame.shape
+    # a snapshot of a picked table is text; it reports the size of the table it was taken from
+    from_snapshot = "pw_total_rows" in frame.attrs
+    if from_snapshot:
+        total_rows = frame.attrs.get("pw_total_rows") or total_rows
+        total_columns = frame.attrs.get("pw_total_columns") or total_columns
     head = frame.head(_MAX_TABLE_ROWS)
     columns = list(head.columns)[:_MAX_TABLE_COLUMNS]
-    numeric = [head[c].dtype.kind in "iufc" for c in columns]
+    if from_snapshot:
+        numeric = [_looks_numeric(head[c]) for c in columns]
+    else:
+        numeric = [head[c].dtype.kind in "iufc" for c in columns]
 
     header = [
         Paragraph(
-            f"{_para(c)}<br/><font size='6.5' color='{_MUTED}'>{_para(head[c].dtype)}</font>",
+            _para(c) if from_snapshot else f"{_para(c)}<br/><font size='6.5' color='{_MUTED}'>{_para(head[c].dtype)}</font>",
             styles["th_num" if n else "th"],
         )
         for c, n in zip(columns, numeric)
@@ -263,6 +268,16 @@ def render_artifact(obj: Any, width: float, styles: dict):
     """(flowable, kind, detail) for a value, kind being 'Table' or 'Figure'. Never raises."""
     from reportlab.platypus import Preformatted
 
+    if isinstance(obj, _Png):
+        try:
+            return _image(bytes(obj), width), "Figure", ""
+        except Exception:
+            pass
+    if isinstance(obj, _Text):
+        lines = [line for chunk in obj.splitlines() or [""] for line in (chunk[i : i + 110] for i in range(0, max(len(chunk), 1), 110))]
+        if len(lines) > _MAX_TEXT_LINES:
+            lines = [*lines[:_MAX_TEXT_LINES], "..."]
+        return Preformatted("\n".join(line.encode("ascii", "replace").decode() for line in lines), styles["mono"]), "Text", ""
     if hasattr(obj, "head") and hasattr(obj, "shape") and hasattr(obj, "columns") and len(obj.shape) == 2:
         try:
             table, detail = _table(obj, width, styles)
@@ -313,6 +328,71 @@ def _styles():
     }
 
 
+class _Text(str):
+    """Plain text a picked element showed, drawn as a monospaced block."""
+
+
+class _Png(bytes):
+    """A picture a picked element showed."""
+
+
+def _snapshot_value(ref: dict):
+    """What the picked element showed, rebuilt from its snapshot, or None when the target carries none."""
+    snapshot = ref.get("snapshot") if isinstance(ref, dict) else None
+    if not isinstance(snapshot, dict):
+        return None
+    kind = snapshot.get("kind") or ("table" if snapshot.get("columns") else None)  # older targets had tables only
+    if kind == "table" and snapshot.get("columns"):
+        import pandas as pd
+
+        frame = pd.DataFrame(snapshot.get("rows") or [], columns=snapshot["columns"])
+        frame.attrs["pw_total_rows"] = snapshot.get("total_rows")
+        frame.attrs["pw_total_columns"] = snapshot.get("total_columns")
+        return frame
+    if kind == "text" and snapshot.get("text"):
+        return _Text(snapshot["text"])
+    if kind == "image" and snapshot.get("png"):
+        try:
+            return _Png(base64.b64decode(snapshot["png"]))
+        except Exception:
+            return None
+    return None
+
+
+_MAX_SETTINGS = 6
+_MAX_SETTING_CHARS = 40
+
+
+def _readable_settings(params: dict) -> list[tuple[str, str]]:
+    """The settings worth printing: short scalar values the analyst chose.
+
+    Tracked functions also record their data arguments (frames, column lists, truncated reprs); those say nothing
+    about what the step did, so they are left out.
+    """
+    settings: list[tuple[str, str]] = []
+    for key, value in params.items():
+        name = str(key)
+        if name.startswith("_") or isinstance(value, (dict, list, tuple, set, frozenset)) or value is None:
+            continue
+        text = str(value)
+        if "..." in text or "<" in text or len(text) > _MAX_SETTING_CHARS or "\n" in text:
+            continue
+        settings.append((name.replace("_", " "), text))
+    return settings[-_MAX_SETTINGS:]
+
+
+def _operation_label(name: str | None) -> str:
+    """A step's function name as words: `_cell_TXez_filtered_log` -> `filtered log`."""
+    if not name:
+        return ""
+    label = re.sub(r"^_*cell_[A-Za-z0-9]+_", "", name).strip("_").replace("_", " ")
+    # a chained call is recorded whole ("set summary[[...]].sort values(...)"): keep what it starts with
+    label = re.split(r"[\[(]", label, maxsplit=1)[0].strip(" .")
+    if len(label) > 40:
+        label = label[:39].rstrip() + "…"
+    return label or name
+
+
 def _stamp(timestamp: str) -> str:
     try:
         return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone().strftime("%d %b %Y, %H:%M")
@@ -349,6 +429,8 @@ def build_pdf(
     title: str = "Annotated analysis report",
     compress: bool = True,
     stores_outputs: bool = True,
+    include_authors: bool = False,
+    include_settings: bool = False,
 ) -> bytes:
     """Lay the rows out as a PDF.
 
@@ -400,7 +482,11 @@ def build_pdf(
         )
         return cell
 
-    authors = sorted({(r.annotation.get("author") or {}).get("display_name", "") for r in rows} - {""})
+    authors = (
+        sorted({(r.annotation.get("author") or {}).get("display_name", "") for r in rows} - {""})
+        if include_authors
+        else []
+    )
     stamps = [r.annotation.get("timestamp", "") for r in rows if r.annotation.get("timestamp")]
     byline = [datetime.now().strftime("%d %B %Y")]
     if authors:
@@ -428,7 +514,7 @@ def build_pdf(
     if not rows:
         story.append(Paragraph("No annotations have been recorded yet.", styles["body"]))
 
-    counters = {"Table": 0, "Figure": 0}
+    counters = {"Table": 0, "Figure": 0, "Text": 0}
     for number, row in enumerate(rows, start=1):
         annotation = row.annotation
         note = annotation.get("note") or ""
@@ -437,11 +523,11 @@ def build_pdf(
         heading = "" if not entry_title or note.strip().startswith(entry_title.rstrip(". ")) else entry_title
         meta = [_stamp(annotation.get("timestamp", ""))]
         if row.step:
-            meta.append(f"Step {row.step}" + (f": {row.operation}" if row.operation else ""))
+            meta.append(f"Step {row.step}" + (f": {_operation_label(row.operation)}" if row.operation else ""))
         else:
             meta.append("Step not recorded")
         author = (annotation.get("author") or {}).get("display_name")
-        if author and len(authors) > 1:  # with a single author, the byline already says it
+        if include_authors and author and len(authors) > 1:  # with a single author, the byline already says it
             meta.append(author)
         block: list = [
             Paragraph(
@@ -463,17 +549,25 @@ def build_pdf(
                 block.append(Paragraph(_field("Target", _target_text(ref, row.step)), styles["field"]))
         else:
             block.append(Paragraph(_field("Target", "the whole analysis at this step"), styles["field"]))
-        if row.params:
-            settings = ", ".join(f"{key} = {_clip(value)}" for key, value in row.params.items())
+        settings = (
+            ", ".join(f"{key} = {value}" for key, value in _readable_settings(row.own_params))
+            if include_settings
+            else ""
+        )
+        if settings:
             block.append(Paragraph(_field("Settings", settings), styles["field"]))
 
         for ref in refs:
-            value = resolve(row, ref) if resolve else None
+            snapshot = _snapshot_value(ref)
+            # the table the analyst picked, as shown, wins over looking a variable up by step: a table built
+            # inside a display cell is not bound to any recorded step
+            value = snapshot if snapshot is not None else (resolve(row, ref) if resolve else None)
             name = _display_name(ref, row.step)
             if value is None and not stores_outputs:
                 continue
             if value is None:
-                block.append(Paragraph(_para(f"The output {name} could not be recovered for this step."), styles["field"]))
+                what = name if name.startswith("output of") else f"The output {name}"
+                block.append(Paragraph(_para(f"{what[0].upper() + what[1:]} could not be recovered."), styles["field"]))
                 continue
             flowable, kind, detail = render_artifact(value, width, styles)
             counters[kind] += 1
