@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+- `provenance_widget.sync.Sync`: keeps a provenance folder on a `provenance-sync` server under the student's key. `restore()`
+  brings the stored work back into an empty (or older) folder when a notebook opens, `push()` saves a changed folder, and
+  `start()` saves in the background a few seconds after the last change. It never raises into the notebook: what goes wrong
+  (wrong key, no connection, a copy saved from another tab) becomes `status`, in words a student can act on. Another
+  student's local copy is never uploaded under a key, and work that was never synced is put aside, not overwritten. The key
+  is held in memory and is not written into the provenance folder.
+- `PmprovAdapter.repeated_runs(min_length=4)`: sequences of steps that were run again (the same functions with the same
+  arguments, one after another), and `describe_run()` for a sentence about each. Nothing is filtered or removed: it only says
+  where to look, and a single step run twice is not flagged.
+
 ## 0.3.1
 
 ### Fixed
