@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+### Fixed
+- Picking a very large Plotly Sankey (more than 1,500 nodes, such as a sequence-based process map of a whole log) no longer
+  blocks the notebook for many seconds: the picture of it is not rendered for the annotation, and the exported report draws
+  it from the recorded step instead.
+
 ## 0.3.0
 
 ### Added

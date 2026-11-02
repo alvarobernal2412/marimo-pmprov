@@ -1,6 +1,6 @@
 [project]
 name = "marimo-pmprov"
-version = "0.3.0"
+version = "0.3.1"
 description = "A marimo anywidget for analytic provenance, annotation and replay on top of pmprov."
 license = "Apache-2.0"
 license-files = ["LICENSE"]
