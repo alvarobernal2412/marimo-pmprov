@@ -1,0 +1,79 @@
+// After a reviewer presses Replay on a note, point at what the note is about: scroll the targeted element of the
+// notebook into view and flash an outline around it. A target is found by the name it was picked under
+// (`data-pw-artifact-name`, set by show_table / show_chart / show).
+//
+// The outline is set inline and animated with the Web Animations API: the elements live in the notebook, outside
+// the widget's shadow root, so the widget's stylesheet does not reach them.
+
+interface TargetRef {
+  artifactName?: string;
+}
+
+const FIRST_LOOK_MS = 500; // the notebook's cells re-run when the cursor moves; give them time to draw
+const LOOK_EVERY_MS = 200;
+const GIVE_UP_MS = 6000;
+const RECHECK_MS = 1500; // a cell that finishes re-running late replaces the element that was flashed
+const FLASH_COLOR = "#F59E0B";
+
+function* inTree(root: Document | ShadowRoot): Generator<HTMLElement> {
+  for (const el of root.querySelectorAll<HTMLElement>("*")) {
+    yield el;
+    if (el.shadowRoot) yield* inTree(el.shadowRoot);
+  }
+}
+
+export function findTargets(names: string[]): HTMLElement[] {
+  const wanted = new Set(names);
+  const found: HTMLElement[] = [];
+  for (const el of inTree(document)) {
+    const name = el.dataset?.pwArtifactName;
+    if (name && wanted.has(name) && el.classList.contains("pw-annotatable")) found.push(el);
+  }
+  return found;
+}
+
+function flash(el: HTMLElement): void {
+  const previous = { outline: el.style.outline, outlineOffset: el.style.outlineOffset };
+  el.style.outline = `3px solid ${FLASH_COLOR}`;
+  el.style.outlineOffset = "4px";
+  const pulse = el.animate(
+    [{ outlineColor: FLASH_COLOR }, { outlineColor: "transparent" }, { outlineColor: FLASH_COLOR }, { outlineColor: "transparent" }],
+    { duration: 2400, easing: "ease-in-out" },
+  );
+  const restore = () => {
+    el.style.outline = previous.outline;
+    el.style.outlineOffset = previous.outlineOffset;
+  };
+  pulse.onfinish = restore;
+  pulse.oncancel = restore;
+}
+
+export function highlightTargets(refs: TargetRef[]): void {
+  const names = refs.map((ref) => ref.artifactName ?? "").filter((name) => name !== "");
+  if (names.length === 0) return;
+  const started = Date.now();
+  let flashed: HTMLElement[] = [];
+
+  const look = () => {
+    const targets = findTargets(names);
+    if (targets.length === 0) {
+      if (Date.now() - started < GIVE_UP_MS) setTimeout(look, LOOK_EVERY_MS);
+      return;
+    }
+    flashed = targets;
+    targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    targets.forEach(flash);
+    setTimeout(recheck, RECHECK_MS);
+  };
+
+  const recheck = () => {
+    const now = findTargets(names);
+    const replaced = now.filter((el) => !flashed.includes(el));
+    if (replaced.length > 0) {
+      flashed = now;
+      replaced.forEach(flash);
+    }
+  };
+
+  setTimeout(look, FIRST_LOOK_MS);
+}

@@ -5,6 +5,7 @@ import { collectAnnotations } from "../annotations";
 import { cursorStateId, latestStateId, moveCursor } from "../replay";
 import { icon } from "../components/icons";
 import { requestPdfExport } from "../export";
+import { highlightTargets } from "../highlight";
 import { renderReplayBar } from "./replay-bar";
 import type { TreeNavState } from "../nav-state";
 
@@ -258,7 +259,10 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
         model,
         isCurrent: cursor !== null && row.stateId === cursor,
         canReplay: !!tree.nodes[row.stateId],
-        onReplay: () => moveCursor(model, tree, row.stateId),
+        onReplay: () => {
+          moveCursor(model, tree, row.stateId);
+          highlightTargets(row.annotation.artifacts ?? []);
+        },
       }),
     ),
   );
