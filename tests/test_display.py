@@ -61,6 +61,21 @@ def test_snapshot_of_picks_the_kind_from_the_value():
     assert snapshot_of(object()) is None and snapshot_of(None) is None
 
 
+def test_a_figure_too_big_to_draw_gets_no_snapshot_instead_of_a_long_render():
+    import time
+
+    import plotly.graph_objects as go
+
+    from provenance_widget.element_snapshot import MAX_DRAWN_SANKEY_NODES, snapshot_of
+
+    size = MAX_DRAWN_SANKEY_NODES + 1
+    huge = go.Figure(go.Sankey(node={"label": [str(i) for i in range(size)]}, link={"source": [0], "target": [1], "value": [1]}))
+
+    started = time.time()
+    assert snapshot_of(huge) is None
+    assert time.time() - started < 1  # it never reached the image renderer
+
+
 def test_show_makes_any_element_pickable_with_a_snapshot_of_its_value():
     import html as htmllib
     import json

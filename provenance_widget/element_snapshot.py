@@ -16,6 +16,17 @@ SNAPSHOT_CELL_CHARS = 60
 SNAPSHOT_TEXT_CHARS = 2000
 SNAPSHOT_IMAGE_MAX_BYTES = 600_000  # a snapshot travels in the page, the widget state and the annotation target
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+# A Sankey this large (a sequence-based process map of a real log can have thousands of nodes) takes many seconds to
+# render to an image and comes out unreadable, and the render blocks the cell that shows it.
+MAX_DRAWN_SANKEY_NODES = 1500
+
+
+def _too_big_to_draw(figure: Any) -> bool:
+    for trace in getattr(figure, "data", None) or ():
+        labels = getattr(getattr(trace, "node", None), "label", None)
+        if labels is not None and len(labels) > MAX_DRAWN_SANKEY_NODES:
+            return True
+    return False
 
 
 def figure_png(obj: Any, dpi: int = 200, scale: float = 2) -> bytes | None:
@@ -106,5 +117,7 @@ def snapshot_of(value: Any) -> dict | None:
         return text_snapshot(value)
     if hasattr(value, "columns") and hasattr(value, "shape") and len(value.shape) == 2:
         return table_snapshot(value)
+    if _too_big_to_draw(value):
+        return None  # the report then draws it from the recorded step, once, when it is exported
     # reduced resolution: the picture has to travel with the annotation
     return image_snapshot(figure_png(value, dpi=110, scale=1.5))
