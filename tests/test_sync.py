@@ -298,6 +298,7 @@ def test_the_background_saver_survives_a_failed_attempt_and_saves_later(service,
 def test_reading_the_folder_waits_for_pmprovs_connection_lock(service, tmp_path):
     import threading
 
+    pytest.importorskip("tracker", reason="pmprov not installed")
     from tracker.storage import _connect_lock
 
     folder = _history(tmp_path / "provenance")
