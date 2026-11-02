@@ -23,6 +23,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+from provenance_widget.repeats import DEFAULT_MIN_LENGTH, find_repeated_runs
 from provenance_widget.interfaces import (
     Agent,
     Annotation,
@@ -255,6 +256,16 @@ class PmprovAdapter:
         before = self._bindings(step["input_state_id"])  # the one variable the step added or changed
         changed = [n for n, v in bindings.items() if before.get(n) != v]
         return changed[0] if len(changed) == 1 else None
+
+    def repeated_runs(self, min_length: int = DEFAULT_MIN_LENGTH):
+        """Sequences of `min_length` or more steps that were run again, with the same arguments (see repeats.py).
+
+        Positions are 0-based indexes into the steps in the order they ran. Nothing is changed in the history.
+        """
+        # two steps are the same when they ran the same function with the same (non-data) arguments
+        nodes = self.get_tree().nodes.values()  # in the order the steps ran
+        keys = [(node.operation.name, json.dumps(node.params, sort_keys=True, default=str)) for node in nodes]
+        return find_repeated_runs(keys, min_length)
 
     def latest_state_id(self, func_name: str | None = None) -> str | None:
         """Return the output_state_id of the most recent step.

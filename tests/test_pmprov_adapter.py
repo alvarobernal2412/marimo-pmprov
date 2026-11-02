@@ -397,3 +397,24 @@ def test_a_value_whose_file_was_left_out_of_a_zip_reads_as_missing_not_as_a_cras
     adapter = PmprovAdapter(rt)
 
     assert adapter.snapshot(state_id, ["with_x"]).get("with_x") is None
+
+
+def test_a_notebook_part_run_twice_is_flagged_as_repeated_steps(rt, event_log):
+    for _ in range(2):
+        for name in ("load", "clean", "enrich", "summarise"):
+            rt.trace_step(func=lambda df: df.assign(x=1), func_name=name, raw_line=f"x = {name}(log)",
+                          args=[event_log], kwargs={})
+    _settle(rt)
+
+    runs = PmprovAdapter(rt).repeated_runs()
+
+    assert [(r.length, r.first, r.repeats) for r in runs] == [(4, 0, [4])]
+
+
+def test_the_same_step_run_again_later_is_not_flagged(rt, event_log):
+    for name in ("load", "clean", "enrich", "summarise", "clean"):
+        rt.trace_step(func=lambda df: df.assign(x=1), func_name=name, raw_line=f"x = {name}(log)",
+                      args=[event_log], kwargs={})
+    _settle(rt)
+
+    assert PmprovAdapter(rt).repeated_runs() == []
