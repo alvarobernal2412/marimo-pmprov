@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+- Pressing Replay on a note in the reviewer now points at what the note is about: the notebook scrolls to the
+  targeted table or chart (found by the name it was picked under) and an outline flashes around it. It needs the
+  notebook to show that element with `show_table`, `show_chart` or `show`.
+
+### Fixed
+- The stepper said "Viewing an earlier step. Notebook outputs still show the latest run." on every earlier step. It now
+  says so only when the notebook's cells do not follow the replay cursor (`panel.reactive_cursor`).
+
+### Removed
+- The `↺ @tag` button on a note, its "Restoring parameters to ..." banner, `ProvenancePanel.request_restore()`,
+  `acknowledge_restore()` and the `restore_request` / `restore_ack` traits. Nothing consumed the request: no parameter was
+  restored and the banner never went away. The button did what Replay does, so Replay is the way to jump to a note's step.
+
 ## 0.2.5
 
 ### Fixed
