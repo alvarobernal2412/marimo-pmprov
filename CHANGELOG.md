@@ -1,8 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.2.5
+
+### Fixed
+- A note keeps what it was written about. The element an analyst picked (which map or table, the clicked part) was
+  held only by the sidebar, and a reloaded note, such as in the reviewer, fell back to "step id - Whole dataset".
+  It is now saved in `picked_elements.json` next to `provenance.db` (so it travels with the folder, and without the
+  snapshot of the value) and read back with the note. Deleting a note removes its entry.
 
 ### Added
+- `provenance_widget.portable`: `zip_provenance(folder)` zips a history without the stored values that are too big to
+  carry (over 2 MB each, and the largest ones when the artifacts pass 25 MB in total) and says what it left out;
+  `unpack_provenance(zip_bytes, folder)` unzips it refusing paths outside the folder; `relocate_artifacts(db, dir)`
+  repoints the stored paths. A step whose value was left out still shows in the history, it just cannot restore it.
 - Apache License 2.0 (`LICENSE`, and `license` in the package metadata).
 - `guides/portable-provenance.md`: moving a stored history to another machine (for example from molab to a laptop), why the
   stored artifact paths break the restore of maps and tables, and the short fix.
