@@ -35,8 +35,9 @@ class ProvenanceWidget(anywidget.AnyWidget):
     show_tree = traitlets.Bool(False).tag(sync=True)
     selection = traitlets.Dict({}).tag(sync=True)
     commits = traitlets.List([]).tag(sync=True)
-    restore_request = traitlets.Dict({}).tag(sync=True)
-    restore_ack = traitlets.Dict({}).tag(sync=True)
+    # True once a notebook binds its cells to the replay cursor (`reactive_cursor`). The stepper tells the reviewer
+    # that outputs still show the latest run only when it is False.
+    outputs_follow_cursor = traitlets.Bool(False).tag(sync=True)
     # Annotation ids hidden by the user, and id -> replacement annotation for
     # edited ones. Overlays on top of tree/commits so they work uniformly for
     # annotations that live on tree nodes and ones committed from the widget.
@@ -488,13 +489,6 @@ class ProvenancePanel:
             state_id = self.latest_state_id or "python"
         self.widget.commits = [*self.widget.commits, {"stateId": state_id, "annotation": annotation_dict}]
 
-    def request_restore(self, tag: str) -> None:
-        self.widget.restore_request = {"tag": tag}
-
-    def acknowledge_restore(self) -> None:
-        self.widget.restore_ack = {"acknowledged": True}
-        self.widget.restore_request = {}
-
     def _cursor_from(self, replay: dict) -> str | None:
         """The recorded state a reviewer is looking at.
 
@@ -527,6 +521,7 @@ class ProvenancePanel:
         """
         get_cursor, set_cursor = state_factory(self._cursor_from(self.widget.replay))
         self.on_replay(set_cursor)
+        self.widget.outputs_follow_cursor = True
         return get_cursor
 
     def snapshot(self, state_id: str | None = None) -> Snapshot:

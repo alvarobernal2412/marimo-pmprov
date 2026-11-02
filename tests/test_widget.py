@@ -76,18 +76,20 @@ def test_sidebar_and_tree_surface_return_the_same_widget_instance():
     assert panel.sidebar() is panel.tree_surface()
 
 
-def test_request_restore_sets_restore_request_with_tag():
+def test_outputs_do_not_follow_the_cursor_until_a_notebook_binds_it():
     panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
-    panel.request_restore("v1.1")
-    assert panel.widget.restore_request == {"tag": "v1.1"}
+    assert panel.widget.outputs_follow_cursor is False
 
 
-def test_acknowledge_restore_clears_request_and_sets_ack():
+def test_binding_the_cursor_to_marimo_state_marks_the_outputs_as_following_it():
     panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
-    panel.request_restore("v1.1")
-    panel.acknowledge_restore()
-    assert panel.widget.restore_request == {}
-    assert panel.widget.restore_ack == {"acknowledged": True}
+    panel.reactive_cursor(lambda initial: (lambda: initial, lambda value: None))
+    assert panel.widget.outputs_follow_cursor is True
+
+
+def test_the_restore_request_api_is_gone():
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    assert not hasattr(panel, "request_restore") and not hasattr(panel, "acknowledge_restore")
 
 
 class _EditableSource(_RecordingSource):

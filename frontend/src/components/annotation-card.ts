@@ -134,14 +134,6 @@ export function annotationCard(
         ? "Replay: move the stepper to this annotation's state"
         : "No recorded state for this annotation";
       actions.appendChild(replayBtn);
-      annotation.tags.forEach((t) => {
-        const restoreBtn = smallButton(`↺ @${t.name}`, "pw-restore-btn", () => {
-          model.set("restore_request", { tag: t.name });
-          model.save_changes();
-        });
-        restoreBtn.title = `Restore parameters to the state tagged @${t.name}`;
-        actions.appendChild(restoreBtn);
-      });
       return;
     }
     actions.appendChild(iconButton("edit", "Edit annotation", "pw-edit-btn", renderEdit));

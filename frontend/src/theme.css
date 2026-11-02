@@ -57,16 +57,6 @@ body.pw-picking-active * { cursor: crosshair !important; }
   padding: 2px 8px;
   font-size: 11px;
 }
-.pw-restore-btn {
-  margin-left: 6px;
-  border: none;
-  background: #F59E0B;
-  color: white;
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 10px;
-  cursor: pointer;
-}
 .pw-artifact-badge {
   border: 1px solid #94A3B8;
   border-radius: 6px;
@@ -163,7 +153,6 @@ body.pw-picking-active * { cursor: crosshair !important; }
 .pw-commit-btn:focus-visible { outline: 2px solid #0F172A; outline-offset: 2px; }
 
 
-.pw-restore-banner { background: #FEF3C7; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; margin-bottom: 8px; font-size: 13px; }
 .pw-pick-btn { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; border: 1px dashed #94A3B8; background: transparent; color: inherit; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
 .pw-pick-btn:hover { border-color: #0EA5E9; color: #0EA5E9; }
 .pw-pick-btn:focus-visible { outline: 2px solid #0EA5E9; outline-offset: 1px; }
@@ -229,7 +218,6 @@ body.pw-picking-active * { cursor: crosshair !important; }
 .pw-replay-delta, .pw-replay-params { font-size: 11px; color: #64748B; }
 .pw-replay-params { font-family: ui-monospace, monospace; word-break: break-all; }
 .pw-replay-note { font-size: 11px; color: #B45309; margin-top: 6px; }
-.pw-card-action.pw-restore-btn { margin-left: 0; background: transparent; color: #B45309; border: 1px solid #F59E0B; border-radius: 6px; padding: 2px 8px; font-size: 11px; }
 /* tree overlay: the stepper sits in a wide pane, so lay it out as one compact row */
 .pw-tree-portal-bar .pw-replay-bar,
 .pw-tree-header + .pw-replay-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }

@@ -28,10 +28,6 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   const tabs = document.createElement("div");
   content.appendChild(tabs);
 
-  const restoreBanner = document.createElement("div");
-  restoreBanner.className = "pw-restore-banner";
-  restoreBanner.style.display = "none";
-  content.appendChild(restoreBanner);
 
   const body = document.createElement("div");
   body.className = "pw-body";
@@ -114,16 +110,6 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
         model.save_changes();
       }),
     );
-  }
-
-  function renderRestoreBanner(): void {
-    const request = model.get("restore_request") as { tag?: string };
-    if (model.get("mode") === "reviewer" && request && request.tag) {
-      restoreBanner.style.display = "block";
-      restoreBanner.textContent = `Restoring parameters to @${request.tag} — dependent marimo cells will re-run reactively.`;
-    } else {
-      restoreBanner.style.display = "none";
-    }
   }
 
   // The tree is a multi-column DAG — it needs landscape space the docked
@@ -222,7 +208,6 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   let lastTreeSignature = JSON.stringify(model.get("tree"));
 
   renderTabs();
-  renderRestoreBanner();
   renderBody();
 
   model.on("change:active_tab", () => {
@@ -231,8 +216,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   });
   model.on("change:mode", () => {
     renderBody();
-    renderRestoreBanner();
   });
+  model.on("change:outputs_follow_cursor", renderBody);
   model.on("change:tree", () => {
     const signature = JSON.stringify(model.get("tree"));
     if (signature === lastTreeSignature) return;
@@ -249,7 +234,6 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   model.on("change:selection", () => {
     if (model.get("active_tab") === "curated") renderBody();
   });
-  model.on("change:restore_request", renderRestoreBanner);
   model.on("change:export_result", () => {
     handleExportResult(model);
     renderBody();

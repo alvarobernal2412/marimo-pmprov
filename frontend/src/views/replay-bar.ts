@@ -125,7 +125,9 @@ export function renderReplayBar(container: HTMLElement, model: AnyModel): void {
   detail.appendChild(count);
   bar.appendChild(detail);
 
-  if (cursor !== latest) {
+  // A notebook whose cells follow the cursor (reactive_cursor) redraws its outputs for the step; only one that does
+  // not keeps showing the latest run.
+  if (cursor !== latest && !model.get("outputs_follow_cursor")) {
     const note = document.createElement("div");
     note.className = "pw-replay-note";
     note.textContent = "Viewing an earlier step. Notebook outputs still show the latest run.";
