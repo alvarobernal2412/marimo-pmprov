@@ -39,34 +39,9 @@ The files themselves are intact; only the paths in the database are stale. Befor
 `\` and `/` makes it work whichever operating system recorded the history.
 
 ```python
-import re
-from pathlib import Path
+from provenance_widget.portable import relocate_artifacts
 
-import duckdb
-
-
-def relocate_artifacts(db_path, artifact_dir):
-    """Point the stored artifacts at `artifact_dir`. Returns how many paths were changed."""
-    if not Path(db_path).exists():
-        return 0
-    try:
-        con = duckdb.connect(str(db_path))
-        try:
-            changed = 0
-            rows = con.execute("SELECT artifact_state_id, content_ref FROM artifact_states").fetchall()
-            for artifact_state_id, ref in rows:
-                new = str(Path(artifact_dir) / re.split(r"[\\/]", ref)[-1])
-                if new != ref:
-                    con.execute(
-                        "UPDATE artifact_states SET content_ref = ? WHERE artifact_state_id = ?",
-                        [new, artifact_state_id],
-                    )
-                    changed += 1
-            return changed
-        finally:
-            con.close()
-    except Exception:
-        return 0  # no history stored yet
+relocate_artifacts(PROVENANCE_DIR / "provenance.db", PROVENANCE_DIR / "artifacts")
 ```
 
 Run it **before** pmprov opens the database (`init_marimo(...)`, or `DuckDBSQLiteBackend(...)` when you only read), because
@@ -85,6 +60,12 @@ right it changes nothing.
 
 - The `artifacts/` folder holds every stored value, so it can be large (a full analysis of the BPI Challenge 2017 log is
   about 0.2 GB). Check the storage limit of the platform before recording there.
+- To carry a history as one small file, use `zip_provenance(folder)` from `provenance_widget.portable`, and
+  `unpack_provenance(zip_bytes, folder)` on the other side. The zip leaves out the stored values over 2 MB (a whole event
+  log, or a copy of it that a step produced) and, if the rest still adds up to more than 25 MB, the largest ones; both
+  limits are arguments. It returns what it left out. The steps and notes are always included, and a step whose value
+  was left out cannot restore it. Let pending writes land first (`rt.storage._executor.submit(lambda: None).result()`).
+- A note's picked element is kept in `picked_elements.json` next to `provenance.db`; keep it with the database.
 - Use the same pmprov and DuckDB major versions on both machines; the database file is DuckDB's own format.
 - A working example of both modes with the fix built in, `analyst.py` and `reviewer.py`, is the `molab/bpm` folder of the
   BPI 2017 exercise.
