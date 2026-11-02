@@ -16,8 +16,11 @@ hard dependency on pmprov (see the `pmprov` extra in pyproject.toml).
 from __future__ import annotations
 
 import ast
+import json
+import os
 import threading
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from provenance_widget.interfaces import (
@@ -33,6 +36,10 @@ from provenance_widget.interfaces import (
     StepCategory,
     Tag,
 )
+
+# What a picked element is made of; the snapshot of its value is left out (it is a copy, and the value is stored).
+_PICKED_KEYS = ('artifactId', 'artifactName', 'granularity', 'detail')
+_PICKED_FILE = 'picked_elements.json'
 
 _SNAPSHOT_CACHE_SIZE = 6  # restored artifact versions kept in memory
 _DEFAULT_TAG_COLOR = "#64748B"
@@ -83,6 +90,7 @@ class PmprovAdapter:
         self._dirty_annotations: set[str] = set()
         self._all_annotations_dirty = False
         self._tree_lock = threading.RLock()
+        self._picked_lock = threading.Lock()
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -280,7 +288,8 @@ class PmprovAdapter:
             Tag(name=t["name"], color=_DEFAULT_TAG_COLOR)
             for t in self._rt.storage.load_tags("analysis_state", state_id)
         ]
-        artifacts = [ArtifactRef(artifact_id=state_id, artifact_name=state_id, granularity="dataset")]
+        whole_step = [ArtifactRef(artifact_id=state_id, artifact_name=state_id, granularity="dataset")]
+        picked = self._read_picked()
 
         return [
             Annotation(
@@ -288,7 +297,7 @@ class PmprovAdapter:
                 title=(a["text"][:_TITLE_MAX_LEN] or "Untitled annotation"),
                 note=a["text"],
                 tags=tags,
-                artifacts=artifacts,
+                artifacts=self._picked_refs(picked.get(a["annotation_id"])) or whole_step,
                 author=self._author,
                 timestamp=a["created_at"],
             )
@@ -312,12 +321,63 @@ class PmprovAdapter:
         from models.annotations import AnnotatableType
 
         annotation_id = self._rt.annotate([(AnnotatableType.ANALYSIS_STATE, state_id)], text)
+        self._remember_picked(annotation_id, annotation_dict.get("artifacts"))
         names = self._tag_names(annotation_dict)
         for name in names:
             self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
         self._persisted_tags[annotation_id] = (state_id, names)
         self._mark_annotations_dirty(state_id)
         return annotation_id
+
+    # The element a note was written about (which map, which table, the clicked part) is not something pmprov
+    # stores: an annotation's only target is a step's state. It is kept in a small file next to the database, so
+    # it moves with the provenance folder and a reloaded note still says what it is about.
+    def _picked_path(self) -> Path:
+        return Path(self._rt.storage.db_path).parent / _PICKED_FILE
+
+    def _read_picked(self) -> dict:
+        try:
+            return json.loads(self._picked_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _write_picked(self, picked: dict) -> None:
+        path = self._picked_path()
+        scratch = path.with_name(path.name + ".tmp")
+        scratch.write_text(json.dumps(picked, indent=1), encoding="utf-8")
+        os.replace(scratch, path)
+
+    def _remember_picked(self, annotation_id: str, artifacts: list | None) -> None:
+        refs = [
+            {key: ref.get(key) for key in _PICKED_KEYS}
+            for ref in artifacts or []
+            if isinstance(ref, dict) and ref.get("artifactName")
+        ]
+        if not refs:
+            return
+        with self._picked_lock:
+            picked = self._read_picked()
+            picked[annotation_id] = refs
+            self._write_picked(picked)
+
+    def _forget_picked(self, annotation_id: str) -> None:
+        with self._picked_lock:
+            picked = self._read_picked()
+            if picked.pop(annotation_id, None) is not None or self._picked_path().exists():
+                self._write_picked(picked)
+
+    @staticmethod
+    def _picked_refs(stored: list | None) -> list[ArtifactRef]:
+        return [
+            ArtifactRef(
+                artifact_id=ref.get("artifactId") or "",
+                artifact_name=ref["artifactName"],
+                granularity=ref.get("granularity") or "dataset",
+                detail=ref.get("detail"),
+            )
+            for ref in stored or []
+            if isinstance(ref, dict) and ref.get("artifactName")
+        ]
 
     @staticmethod
     def _tag_names(annotation_dict: dict) -> set[str]:
@@ -357,6 +417,7 @@ class PmprovAdapter:
         state_id = self._annotation_state(annotation_id)
         owned = self._persisted_tags.get(annotation_id, (None, None))[1]
         self._rt.remove_annotation(annotation_id)
+        self._forget_picked(annotation_id)
         self._persisted_tags.pop(annotation_id, None)
         self._mark_annotations_dirty(state_id)
         if state_id is None:

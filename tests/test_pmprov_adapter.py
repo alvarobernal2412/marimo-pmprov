@@ -329,3 +329,71 @@ def test_a_cached_tree_still_shows_annotations_added_edited_and_removed_later(rt
 
     adapter.remove_annotation(annotation_id)
     assert adapter.get_tree().nodes[state_id].annotations == []
+
+
+PICKED = {
+    "artifactId": "ignored-here",
+    "artifactName": "map_credit_score_carriers",
+    "granularity": "chart_selection",
+    "detail": "O_Create Offer",
+    "snapshot": {"kind": "text", "text": "not stored"},
+}
+
+
+def test_picked_element_survives_a_reload(rt, event_log, tmp_path):
+    state_id = _traced_state(rt, event_log)
+    adapter = PmprovAdapter(rt)
+    adapter.persist_annotation(state_id, {"note": "about the map", "artifacts": [{**PICKED, "artifactId": state_id}]})
+
+    reopened = PmprovAdapter(rt)  # a new session builds its references from what was stored
+    ref = reopened.get_tree().nodes[state_id].annotations[0].artifacts[0]
+
+    assert (ref.artifact_id, ref.artifact_name, ref.granularity, ref.detail) == (
+        state_id, "map_credit_score_carriers", "chart_selection", "O_Create Offer",
+    )
+
+
+def test_picked_element_is_kept_small(rt, event_log, tmp_path):
+    state_id = _traced_state(rt, event_log)
+    PmprovAdapter(rt).persist_annotation(state_id, {"note": "x", "artifacts": [{**PICKED, "artifactId": state_id}]})
+
+    stored = (tmp_path / "picked_elements.json").read_text(encoding="utf-8")
+
+    assert "not stored" not in stored  # the snapshot is a copy of a value, not a reference
+
+
+def test_a_note_without_a_picked_element_still_targets_the_whole_step(rt, event_log):
+    state_id = _traced_state(rt, event_log)
+    PmprovAdapter(rt).persist_annotation(state_id, {"note": "about the step"})
+
+    ref = PmprovAdapter(rt).get_tree().nodes[state_id].annotations[0].artifacts[0]
+
+    assert (ref.artifact_name, ref.granularity) == (state_id, "dataset")
+
+
+def test_removing_a_note_forgets_its_picked_element(rt, event_log, tmp_path):
+    import json
+
+    state_id = _traced_state(rt, event_log)
+    adapter = PmprovAdapter(rt)
+    annotation_id = adapter.persist_annotation(
+        state_id, {"note": "x", "artifacts": [{**PICKED, "artifactId": state_id}]}
+    )
+
+    adapter.remove_annotation(annotation_id)
+
+    assert json.loads((tmp_path / "picked_elements.json").read_text(encoding="utf-8")) == {}
+
+
+@needs_bindings
+def test_a_value_whose_file_was_left_out_of_a_zip_reads_as_missing_not_as_a_crash(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
+                  args=[event_log], kwargs={})
+    _settle(rt)
+    state_id = rt._current_state_id
+    for artifact in rt.storage.artifact_dir.glob("*.parquet"):
+        artifact.unlink()
+
+    adapter = PmprovAdapter(rt)
+
+    assert adapter.snapshot(state_id, ["with_x"]).get("with_x") is None
