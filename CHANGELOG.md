@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+- `Sync` could not save while pmprov had `provenance.db` open on Windows (the zip raised `PermissionError`), and the failure
+  ended the background saver for good. It now reads the folder while holding pmprov's connection lock, so no connection has the
+  file open and the copy is consistent, and a failed attempt is reported as status `busy` and tried again. The saver no longer
+  stops on any one failure.
+
 ## 0.4.0
 
 ### Added
