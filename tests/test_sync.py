@@ -254,3 +254,62 @@ def test_the_zip_sent_leaves_out_what_zip_provenance_leaves_out(service, tmp_pat
 
     assert "artifacts/whole_log.parquet" not in _names(service.stored[KEY][1])
     assert zip_provenance(folder)[1][0][1] == 3_000_000
+
+
+def test_a_folder_that_cannot_be_read_right_now_is_a_status_not_a_crash(service, tmp_path, monkeypatch):
+    import provenance_widget.sync as sync_module
+
+    def locked(folder):
+        raise PermissionError("provenance.db is open in another connection")
+
+    monkeypatch.setattr(sync_module, "zip_provenance", locked)
+    sync = Sync(service.url, KEY, _history(tmp_path / "provenance"))
+
+    assert sync.push() is False
+    assert sync.status.state == "busy" and "again" in sync.status.message.lower()
+
+
+def test_the_background_saver_survives_a_failed_attempt_and_saves_later(service, tmp_path, monkeypatch):
+    import provenance_widget.sync as sync_module
+
+    real = sync_module.zip_provenance
+    attempts = []
+
+    def sometimes_locked(folder):
+        attempts.append(1)
+        if len(attempts) <= 2:
+            raise PermissionError("locked")
+        return real(folder)
+
+    monkeypatch.setattr(sync_module, "zip_provenance", sometimes_locked)
+    folder = _history(tmp_path / "provenance")
+    sync = Sync(service.url, KEY, folder, debounce=0.2, poll=0.1)
+    sync.start()
+    try:
+        deadline = time.time() + 8
+        while service.stored.get(KEY, (0,))[0] < 1 and time.time() < deadline:
+            time.sleep(0.1)
+        assert KEY in service.stored  # a later attempt got through; the thread did not die on the first
+        assert sync._thread.is_alive()
+    finally:
+        sync.stop(flush=False)
+
+
+def test_reading_the_folder_waits_for_pmprovs_connection_lock(service, tmp_path):
+    import threading
+
+    from tracker.storage import _connect_lock
+
+    folder = _history(tmp_path / "provenance")
+    sync = Sync(service.url, KEY, folder)
+    finished = threading.Event()
+
+    _connect_lock.acquire()  # a pmprov connection is open: the database file must not be read now
+    try:
+        worker = threading.Thread(target=lambda: (sync.push(), finished.set()))
+        worker.start()
+        assert not finished.wait(0.5)
+    finally:
+        _connect_lock.release()
+    assert finished.wait(5)
+    worker.join()

@@ -9,6 +9,7 @@ The key is held in memory only. It is not written into the provenance folder (wh
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import shutil
@@ -25,18 +26,40 @@ from .portable import unpack_provenance, zip_provenance
 
 @dataclass
 class SyncStatus:
-    state: str = "idle"  # idle | saved | offline | unauthorized | too-large
+    state: str = "idle"  # idle | saved | offline | unauthorized | too-large | busy
     message: str = "Not saved to the course server yet."
     revision: int = 0
     saved_at: str | None = None
 
 
 _MESSAGES = {
+    "busy": "Your work could not be read to save it just now. It will be tried again in a moment.",
     "saved": "Your work is saved on the course server.",
     "offline": "The course server could not be reached. Your work is kept in this notebook and will be saved when it is back.",
     "unauthorized": "The key was not accepted. Check that you pasted it completely, or ask your instructor.",
     "too-large": "Your work is too large for the course server. Tell your instructor.",
 }
+
+
+@contextlib.contextmanager
+def _storage_quiet(timeout: float = 30.0):
+    """Hold pmprov's connection lock while the provenance folder is read.
+
+    pmprov keeps that lock for as long as a DuckDB connection is open, so while it is held nothing has `provenance.db` open.
+    That matters on Windows, where an open DuckDB file cannot be read, and gives a consistent copy everywhere. Without pmprov
+    there is nothing to wait for.
+    """
+    try:
+        from tracker.storage import _connect_lock
+    except Exception:
+        yield
+        return
+    acquired = _connect_lock.acquire(timeout=timeout)
+    try:
+        yield
+    finally:
+        if acquired:
+            _connect_lock.release()
 
 
 class _Failure(Exception):
@@ -88,7 +111,8 @@ class Sync:
         )
 
     def _local_zip(self) -> tuple[bytes, str]:
-        data, _ = zip_provenance(self.folder)
+        with _storage_quiet():
+            data, _ = zip_provenance(self.folder)
         return data, hashlib.sha256(data).hexdigest()
 
     def _has_history(self) -> bool:
@@ -186,7 +210,11 @@ class Sync:
             if not self._has_history():
                 return False
             state = self._read_state()
-            data, local_hash = self._local_zip()
+            try:
+                data, local_hash = self._local_zip()
+            except OSError:
+                self._fail("busy")  # the files could not be read this time; the next attempt usually can
+                return False
             owned = state.get("key_hash") == self._key_hash
             if owned and state.get("sha256") == local_hash:
                 return False
@@ -235,13 +263,18 @@ class Sync:
     def _run(self) -> None:
         seen, changed_at, pending = None, time.monotonic(), True  # whatever is there at the start is saved once
         while not self._stop.wait(self.poll):
-            current = self._fingerprint()
-            if current != seen:
-                seen, changed_at, pending = current, time.monotonic(), True
-            elif pending and time.monotonic() - changed_at >= self.debounce:
-                self._settle()
-                self.push()
-                seen, pending = self._fingerprint(), False
+            try:
+                current = self._fingerprint()
+                if current != seen:
+                    seen, changed_at, pending = current, time.monotonic(), True
+                elif pending and time.monotonic() - changed_at >= self.debounce:
+                    self._settle()
+                    pending = not self.push() and self.status.state in ("busy", "offline")  # try again if it could not
+                    seen = self._fingerprint()
+                    changed_at = time.monotonic()
+            except Exception:
+                # the saver must outlive any one failed attempt; the next pass tries again
+                changed_at = time.monotonic()
 
     def stop(self, flush: bool = True) -> None:
         self._stop.set()
