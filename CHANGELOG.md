@@ -10,6 +10,8 @@
 - `zip_provenance` leaves out stored values over 500 KB (it was 2 MB). Maps and tables are a few KB to a few tens of KB; what
   the limit removes are copies of a whole event log, which made the zip several MB for no benefit. Pass `max_artifact_bytes`
   to change it.
+- `zip_provenance` makes the same zip for the same contents: the files' modification times are no longer written into it. A
+  file that was only touched used to change the zip, and `Sync` saved an identical copy again.
 
 ## 0.4.1
 

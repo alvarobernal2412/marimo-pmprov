@@ -118,3 +118,16 @@ def test_a_copy_of_the_whole_log_is_left_out_by_default_and_maps_and_tables_stay
     assert "artifacts/map.plotly.json" in _names(data) and "artifacts/table.parquet" in _names(data)
     assert "artifacts/log_copy.parquet" not in _names(data)
     assert left_out == [("log_copy.parquet", 1_050_000)]
+
+
+def test_the_same_contents_make_the_same_zip_even_when_the_files_are_touched(tmp_path):
+    import os
+
+    folder = _folder(tmp_path, {"map.plotly.json": 100})
+    first, _ = zip_provenance(folder)
+
+    for path in folder.rglob("*"):
+        if path.is_file():
+            os.utime(path, (1_900_000_000, 1_900_000_000))
+
+    assert zip_provenance(folder)[0] == first
