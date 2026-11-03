@@ -14,8 +14,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "reportlab>=4", "pypdf", "pandas", "matplotlib", "altair", "vl-convert-python", "plotly"]
 # pmprov is optional: the widget runs against a mock source without it.
-# pmprov needs Python >= 3.13 and pins exact versions of marimo, pandas, etc.
-pmprov = ["pmprov>=0.9; python_version >= '3.13'"]
+# pmprov needs Python >= 3.13 and pins exact versions of marimo, pandas, etc. 0.10 is the first with RuntimeTracker.resume and
+# the storage lock that Sync relies on; duckdb is the store the notebooks use.
+pmprov = ["pmprov[duckdb,parquet,graph]>=0.10; python_version >= '3.13'"]
 # "Export PDF" in the analyst sidebar (ProvenancePanel.export_pdf). Embedding Plotly
 # figures also needs kaleido.
 pdf = ["reportlab>=4"]
