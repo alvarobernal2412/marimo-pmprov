@@ -81,6 +81,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       already-published: ${{ steps.version-check.outputs.already-published }}
+      version: ${{ steps.version-check.outputs.version }}
     steps:
       - name: Checkout ⬇️
         uses: actions/checkout@v7.0.1
@@ -99,6 +100,7 @@ jobs:
           NAME=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['name'])")
           VERSION=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/$NAME/$VERSION/json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           if [ "$STATUS" = "200" ]; then
             echo "already-published=true" >> $GITHUB_OUTPUT
           else
@@ -137,3 +139,33 @@ jobs:
       - name: Publish to PyPI 🚀
         run: uv publish
 
+  release:
+    # The GitHub release (and its tag) for what was just published, so the Releases page shows the version that is on PyPI.
+    runs-on: ubuntu-latest
+    needs: [build, publish]
+    if: needs.build.outputs.already-published == 'false'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout ⬇️
+        uses: actions/checkout@v7.0.1
+
+      - name: Download dist artifacts 📥
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create the release 🏷️
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          # the notes are this version's section of CHANGELOG.md
+          awk -v v="$VERSION" '/^## /{p = ($2 == v)} p' CHANGELOG.md | tr -d '\r' > notes.md
+          [ -s notes.md ] || echo "Release $VERSION" > notes.md
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already has a release"
+          else
+            gh release create "v$VERSION" dist/* --title "v$VERSION" --notes-file notes.md --target "$GITHUB_SHA"
+          fi
