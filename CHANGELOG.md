@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.4
+
+### Added
+- Stepping through a recorded analysis flashes what the step produced. When a reviewer moves the stepper (not only when they press
+  Replay on a note), the tables and maps the notebook shows under that step's own state id are scrolled into view and outlined, so
+  it is easy to see where a step shows up. `Snapshot.produced_here(name)` says whether the step the snapshot ends at (re)bound a
+  name; a notebook gives such an output the snapshot's `state_id` as its `artifact_id`, and an earlier output a different one.
+
 ## 0.4.3
 
 ### Added
