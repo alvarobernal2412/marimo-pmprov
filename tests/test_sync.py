@@ -314,3 +314,45 @@ def test_reading_the_folder_waits_for_pmprovs_connection_lock(service, tmp_path)
         _connect_lock.release()
     assert finished.wait(5)
     worker.join()
+
+
+def _wait_for(condition, seconds=6):
+    deadline = time.time() + seconds
+    while not condition() and time.time() < deadline:
+        time.sleep(0.02)
+    return condition()
+
+
+def test_a_change_waiting_to_be_saved_says_so_until_it_is_saved(service, tmp_path):
+    folder = _history(tmp_path / "provenance")
+    sync = Sync(service.url, KEY, folder, debounce=1.0, poll=0.1)
+    sync.start()
+    try:
+        assert _wait_for(lambda: sync.status.state == "saved")  # what was there at the start is saved once
+        (folder / "provenance.db").write_bytes(b"a new note")
+        assert _wait_for(lambda: sync.status.state == "pending", seconds=3)
+        assert "wait" in sync.status.message.lower()
+        assert _wait_for(lambda: sync.status.state == "saved" and sync.status.revision >= 2)
+    finally:
+        sync.stop(flush=False)
+
+
+def test_a_change_that_leaves_the_contents_as_they_were_does_not_stay_pending(service, tmp_path):
+    folder = _history(tmp_path / "provenance")
+    sync = Sync(service.url, KEY, folder, debounce=0.3, poll=0.1)
+    sync.start()
+    try:
+        assert _wait_for(lambda: sync.status.state == "saved")
+        revision = sync.status.revision
+        (folder / "provenance.db").write_bytes((folder / "provenance.db").read_bytes())  # touched, not changed
+        time.sleep(1.0)
+        assert sync.status.state == "saved" and sync.status.revision == revision
+    finally:
+        sync.stop(flush=False)
+
+
+def test_a_note_is_on_the_server_within_a_few_seconds_by_default(service, tmp_path):
+    folder = _history(tmp_path / "provenance")
+    sync = Sync(service.url, KEY, folder)
+
+    assert sync.debounce <= 2.0 and sync.poll <= 1.0

@@ -26,7 +26,7 @@ from .portable import unpack_provenance, zip_provenance
 
 @dataclass
 class SyncStatus:
-    state: str = "idle"  # idle | saved | offline | unauthorized | too-large | busy
+    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | busy
     message: str = "Not saved to the course server yet."
     revision: int = 0
     saved_at: str | None = None
@@ -35,6 +35,7 @@ class SyncStatus:
 _MESSAGES = {
     "busy": "Your work could not be read to save it just now. It will be tried again in a moment.",
     "saved": "Your work is saved on the course server.",
+    "pending": "Saving your latest changes… please wait a moment before closing this page.",
     "offline": "The course server could not be reached. Your work is kept in this notebook and will be saved when it is back.",
     "unauthorized": "The key was not accepted. Check that you pasted it completely, or ask your instructor.",
     "too-large": "Your work is too large for the course server. Tell your instructor.",
@@ -75,8 +76,8 @@ class Sync:
         folder,
         *,
         settle=None,
-        debounce: float = 5.0,
-        poll: float = 2.0,
+        debounce: float = 2.0,
+        poll: float = 1.0,
         timeout: float = 20.0,
     ) -> None:
         self.url = url.rstrip("/")
@@ -245,6 +246,22 @@ class Sync:
             sorted((str(p.relative_to(self.folder)), p.stat().st_size, p.stat().st_mtime_ns) for p in self.folder.rglob("*") if p.is_file())
         ) if self.folder.exists() else ()
 
+    def _mark_pending(self) -> None:
+        """The folder changed and the change is not on the server yet: say so, so nobody closes the page too early."""
+        if self.status.state in ("idle", "saved"):
+            self.status = SyncStatus("pending", _MESSAGES["pending"], self.status.revision, self.status.saved_at)
+
+    def _clear_pending(self) -> None:
+        """The change turned out not to need saving (the contents are what the server has)."""
+        if self.status.state == "pending":
+            saved = self.status.revision > 0
+            self.status = SyncStatus(
+                "saved" if saved else "idle",
+                _MESSAGES["saved"] if saved else SyncStatus.message,
+                self.status.revision,
+                self.status.saved_at,
+            )
+
     def _settle(self) -> None:
         if self.settle is not None:
             try:
@@ -267,9 +284,12 @@ class Sync:
                 current = self._fingerprint()
                 if current != seen:
                     seen, changed_at, pending = current, time.monotonic(), True
+                    self._mark_pending()
                 elif pending and time.monotonic() - changed_at >= self.debounce:
                     self._settle()
-                    pending = not self.push() and self.status.state in ("busy", "offline")  # try again if it could not
+                    pushed = self.push()
+                    self._clear_pending()
+                    pending = not pushed and self.status.state in ("busy", "offline")  # try again if it could not
                     seen = self._fingerprint()
                     changed_at = time.monotonic()
             except Exception:
