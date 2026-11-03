@@ -8,9 +8,31 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the oldest supported Python, without pmprov (the widget runs against its mock source)
+          - name: py3.11 without pmprov
+            os: ubuntu-latest
+            python: "3.11"
+            extras: "--extra dev"
+          # with pmprov, the way a hosted notebook (molab) runs it, and on Windows, where the package is developed
+          - name: py3.13 with pmprov
+            os: ubuntu-latest
+            python: "3.13"
+            extras: "--extra dev --extra pmprov"
+          - name: py3.13 with pmprov, Windows
+            os: windows-latest
+            python: "3.13"
+            extras: "--extra dev --extra pmprov"
     steps:
       - name: Checkout ⬇️
         uses: actions/checkout@v7.0.1
@@ -18,16 +40,17 @@ jobs:
       - name: Set up Python 🐍
         uses: actions/setup-python@v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install uv 📦
         uses: astral-sh/setup-uv@v9.0.0
 
       - name: Install dependencies 📦
-        run: uv sync --extra dev
+        # --locked fails when uv.lock does not match pyproject.toml (a version bump that forgot the lock file)
+        run: uv sync --locked ${{ matrix.extras }}
 
       - name: Run tests 🧪
-        run: uv run pytest
+        run: uv run pytest -rs
 
   build:
     runs-on: ubuntu-latest
@@ -90,3 +113,4 @@ jobs:
 
       - name: Publish to PyPI 🚀
         run: uv publish
+
