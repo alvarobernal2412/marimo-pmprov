@@ -52,9 +52,32 @@ jobs:
       - name: Run tests 🧪
         run: uv run pytest -rs
 
+  frontend:
+    name: frontend bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ⬇️
+        uses: actions/checkout@v7.0.1
+
+      - name: Install the frontend's packages 📦
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check 🔎
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Rebuild the bundle 🏗️
+        working-directory: frontend
+        run: npm run build
+
+      - name: The committed bundle is the one the source builds 🧾
+        # provenance_widget/static/widget.js is what gets packaged; a source change without a rebuilt bundle would ship the old one
+        run: git diff --exit-code -- provenance_widget/static
+
   build:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       already-published: ${{ steps.version-check.outputs.already-published }}
