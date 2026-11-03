@@ -153,6 +153,21 @@ def test_snapshot_gives_each_variable_as_bound_at_that_state(rt, event_log):
 
 
 @needs_bindings
+def test_snapshot_produced_names_only_what_the_step_rebound(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
+                  args=[event_log], kwargs={})
+    first_state = rt._current_state_id
+    rt.trace_step(func=lambda df: df.head(1), func_name="first_row", raw_line="small = first_row(with_x)",
+                  args=[event_log.assign(x=1)], kwargs={})
+    second_state = rt._current_state_id
+    _settle(rt)
+    adapter = PmprovAdapter(rt)
+
+    assert adapter.snapshot_produced(first_state, None) == {"with_x"}
+    assert adapter.snapshot_produced(second_state, first_state) == {"small"}  # with_x is carried over, not produced again
+
+
+@needs_bindings
 def test_snapshot_loads_only_the_requested_names(rt, event_log):
     rt.trace_step(func=lambda df: df.assign(x=1), func_name="add_x", raw_line="with_x = add_x(event_log)",
                   args=[event_log], kwargs={})

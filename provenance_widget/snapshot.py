@@ -24,6 +24,7 @@ class Snapshot:
     params: dict = field(default_factory=dict)
     step: int | None = None
     bound: frozenset[str] | None = None
+    produced: frozenset[str] = frozenset()
     error: str | None = None
     loader: Callable[[list[str]], dict] | None = field(default=None, repr=False, compare=False)
     _cache: dict = field(default_factory=dict, repr=False, compare=False)
@@ -54,6 +55,10 @@ class Snapshot:
         if not self.is_live and self.bound is not None:
             self._load(sorted(self.bound))
         return dict(self._cache)
+
+    def produced_here(self, name: str) -> bool:
+        """True when the step this snapshot ends at is the one that (re)bound `name`."""
+        return name in self.produced
 
     def status(self, name: str) -> str:
         """"live", "ok", "not_stored" (bound here but pmprov holds no loadable

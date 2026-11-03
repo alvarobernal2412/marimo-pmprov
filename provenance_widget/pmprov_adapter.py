@@ -532,6 +532,13 @@ class PmprovAdapter:
             current = step["input_state_id"]
         return sources
 
+    def snapshot_produced(self, state_id: str, parent_id: str | None) -> set[str]:
+        """Names of the variables the step that ended at *state_id* (re)bound: the ones whose value differs from the parent state's."""
+        self.settle()
+        now = self._bindings(state_id)
+        before = self._bindings(parent_id) if parent_id else {}
+        return {name for name, version in now.items() if before.get(name) != version}
+
     def snapshot_bindings(self, state_id: str) -> set[str]:
         """Names of the variables bound at *state_id*, without loading any data."""
         self.settle()

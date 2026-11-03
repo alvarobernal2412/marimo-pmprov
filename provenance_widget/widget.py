@@ -552,6 +552,12 @@ class ProvenancePanel:
                     bound = frozenset(source.snapshot_bindings(state_id))
                 except Exception as exc:  # e.g. a pmprov too old to record bindings
                     error = f"{type(exc).__name__}: {exc}"
+        produced: frozenset[str] = frozenset()
+        if hasattr(self._source, "snapshot_produced"):
+            try:
+                produced = frozenset(self._source.snapshot_produced(state_id, node.get("parentStateId")))
+            except Exception:
+                pass  # no highlight of what a step produced, nothing else is lost
         nodes = self.widget.tree.get("nodes") or {}
         path: list[dict] = []
         current = state_id
@@ -567,6 +573,7 @@ class ProvenancePanel:
         return Snapshot(
             state_id=state_id,
             bound=bound,
+            produced=produced,
             error=error,
             loader=loader,
             operation=(node.get("operation") or {}).get("name"),
