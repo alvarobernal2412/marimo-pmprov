@@ -51,11 +51,29 @@ function flash(el: HTMLElement): void {
 export function highlightTargets(refs: TargetRef[]): void {
   const names = refs.map((ref) => ref.artifactName ?? "").filter((name) => name !== "");
   if (names.length === 0) return;
+  highlightWhere(() => findTargets(names));
+}
+
+// Stepping through a recorded analysis: point at what the step reached (the tables and maps the notebook shows under
+// this step's own state id), so it is easy to see where a step shows up in the notebook.
+export function findProducedBy(stateId: string): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  for (const el of inTree(document)) {
+    if (el.dataset?.pwArtifactId === stateId && el.classList.contains("pw-annotatable")) found.push(el);
+  }
+  return found;
+}
+
+export function highlightProducedBy(stateId: string): void {
+  highlightWhere(() => findProducedBy(stateId));
+}
+
+function highlightWhere(find: () => HTMLElement[]): void {
   const started = Date.now();
   let flashed: HTMLElement[] = [];
 
   const look = () => {
-    const targets = findTargets(names);
+    const targets = find();
     if (targets.length === 0) {
       if (Date.now() - started < GIVE_UP_MS) setTimeout(look, LOOK_EVERY_MS);
       return;
@@ -67,7 +85,7 @@ export function highlightTargets(refs: TargetRef[]): void {
   };
 
   const recheck = () => {
-    const now = findTargets(names);
+    const now = find();
     const replaced = now.filter((el) => !flashed.includes(el));
     if (replaced.length > 0) {
       flashed = now;

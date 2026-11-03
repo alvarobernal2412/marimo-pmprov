@@ -260,7 +260,7 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
         isCurrent: cursor !== null && row.stateId === cursor,
         canReplay: !!tree.nodes[row.stateId],
         onReplay: () => {
-          moveCursor(model, tree, row.stateId);
+          moveCursor(model, tree, row.stateId, false, false); // the note's own target is highlighted below
           highlightTargets(row.annotation.artifacts ?? []);
         },
       }),

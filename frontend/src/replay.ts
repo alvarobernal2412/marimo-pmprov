@@ -1,5 +1,6 @@
 import type { ProvenanceNodeJson, ProvenanceTreeJson } from "./types";
 import type { TreeNavState } from "./nav-state";
+import { highlightProducedBy } from "./highlight";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -55,7 +56,7 @@ export function nextChoices(model: AnyModel, tree: ProvenanceTreeJson, stateId: 
   return kids.sort((a, b) => (a.stateId === remembered ? -1 : b.stateId === remembered ? 1 : 0));
 }
 
-export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: string, forget = false): void {
+export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: string, forget = false, highlight = true): void {
   const node = tree.nodes[stateId];
   if (!node) return;
   const previous = cursorStateId(model, tree);
@@ -69,4 +70,5 @@ export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: s
   model.set("selection", { ...selection, node: { pickedStateId: stateId } });
   model.set("replay", { stateId, params: node.params, isLatest: stateId === latestStateId(tree) });
   model.save_changes();
+  if (highlight && model.get("outputs_follow_cursor")) highlightProducedBy(stateId); // only a notebook that redraws per step has them
 }
