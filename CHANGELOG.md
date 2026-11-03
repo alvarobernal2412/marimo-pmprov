@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2
+
+### Changed
+- `Sync` saves sooner: a change is sent 2 seconds after the last one (it was 5), checked every second. While a change is waiting
+  its status is `pending` ("Saving your latest changes… please wait a moment before closing this page."), so a student can
+  tell when it is safe to close the page; it returns to `saved` once the change is on the server, or when it turned out not
+  to change anything.
+- `zip_provenance` leaves out stored values over 500 KB (it was 2 MB). Maps and tables are a few KB to a few tens of KB; what
+  the limit removes are copies of a whole event log, which made the zip several MB for no benefit. Pass `max_artifact_bytes`
+  to change it.
+
 ## 0.4.1
 
 ### Fixed
