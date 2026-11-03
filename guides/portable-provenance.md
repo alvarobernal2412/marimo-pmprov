@@ -61,7 +61,7 @@ right it changes nothing.
 - The `artifacts/` folder holds every stored value, so it can be large (a full analysis of the BPI Challenge 2017 log is
   about 0.2 GB). Check the storage limit of the platform before recording there.
 - To carry a history as one small file, use `zip_provenance(folder)` from `provenance_widget.portable`, and
-  `unpack_provenance(zip_bytes, folder)` on the other side. The zip leaves out the stored values over 2 MB (a whole event
+  `unpack_provenance(zip_bytes, folder)` on the other side. The zip leaves out the stored values over 500 KB (a whole event
   log, or a copy of it that a step produced) and, if the rest still adds up to more than 25 MB, the largest ones; both
   limits are arguments. It returns what it left out. The steps and notes are always included, and a step whose value
   was left out cannot restore it. Let pending writes land first (`rt.storage._executor.submit(lambda: None).result()`).

@@ -11,7 +11,7 @@ import re
 import zipfile
 from pathlib import Path
 
-DEFAULT_MAX_ARTIFACT_BYTES = 2_000_000
+DEFAULT_MAX_ARTIFACT_BYTES = 500_000
 DEFAULT_MAX_TOTAL_BYTES = 25_000_000
 
 

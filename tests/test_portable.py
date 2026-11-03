@@ -108,3 +108,13 @@ def test_left_out_values_are_named_by_their_variable(tmp_path):
     _, left_out = zip_provenance(folder, max_artifact_bytes=1000)
 
     assert left_out == [("event_log", 5000)]
+
+
+def test_a_copy_of_the_whole_log_is_left_out_by_default_and_maps_and_tables_stay(tmp_path):
+    folder = _folder(tmp_path, {"map.plotly.json": 20_000, "table.parquet": 4_000, "log_copy.parquet": 1_050_000})
+
+    data, left_out = zip_provenance(folder)
+
+    assert "artifacts/map.plotly.json" in _names(data) and "artifacts/table.parquet" in _names(data)
+    assert "artifacts/log_copy.parquet" not in _names(data)
+    assert left_out == [("log_copy.parquet", 1_050_000)]

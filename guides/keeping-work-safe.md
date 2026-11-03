@@ -14,7 +14,7 @@ sync.start()     # saves in the background a few seconds after the last change
 sync.status.message   # "Your work is saved on the course server." or what to do about a problem
 ```
 
-- It sends the same small zip as `portable.zip_provenance` (values over 2 MB are left out), not individual rows.
+- It sends the same small zip as `portable.zip_provenance` (values over 500 KB are left out), not individual rows.
 - It never raises into the notebook. `status.state` is `saved`, `offline`, `unauthorized` or `too-large`.
 - Two tabs saving at once end with the latest save, and the status says that a copy from another place was replaced.
 - A folder that belongs to another key is put aside, never uploaded under this one. Work that was never synced is put aside
