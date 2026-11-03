@@ -26,7 +26,7 @@ from .portable import unpack_provenance, zip_provenance
 
 @dataclass
 class SyncStatus:
-    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | busy
+    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | closed | busy
     message: str = "Not saved to the course server yet."
     revision: int = 0
     saved_at: str | None = None
@@ -39,6 +39,7 @@ _MESSAGES = {
     "offline": "The course server could not be reached. Your work is kept in this notebook and will be saved when it is back.",
     "unauthorized": "The key was not accepted. Check that you pasted it completely, or ask your instructor.",
     "too-large": "Your work is too large for the course server. Tell your instructor.",
+    "closed": "This course is closed, so your work is no longer saved. What you saved before is kept.",
 }
 
 
@@ -143,6 +144,8 @@ class Sync:
             return _Failure("unauthorized")
         if code == 413:
             return _Failure("too-large")
+        if code == 423:
+            return _Failure("closed")  # the course's closing time has passed: saving is over, and retrying would not help
         return _Failure("offline")
 
     # --- opening a notebook --------------------------------------------------------------------------------------------

@@ -256,6 +256,24 @@ def test_the_zip_sent_leaves_out_what_zip_provenance_leaves_out(service, tmp_pat
     assert zip_provenance(folder)[1][0][1] == 3_000_000
 
 
+def test_a_closed_course_is_a_status_and_the_saver_does_not_keep_trying(service, tmp_path):
+    folder = _history(tmp_path / "provenance")
+    sync = Sync(service.url, KEY, folder, debounce=0.2, poll=0.1)
+    service.force_status = 423  # what the server answers once the course has closed
+
+    assert sync.push() is False
+    assert sync.status.state == "closed" and "closed" in sync.status.message.lower() and "kept" in sync.status.message.lower()
+
+    service.force_status = None
+    sync.start()
+    try:
+        (folder / "provenance.db").write_bytes(b"changed")
+        time.sleep(1.0)
+        assert sync._thread.is_alive()  # the saver is still running; it just has nothing it can do
+    finally:
+        sync.stop(flush=False)
+
+
 def test_a_folder_that_cannot_be_read_right_now_is_a_status_not_a_crash(service, tmp_path, monkeypatch):
     import provenance_widget.sync as sync_module
 
