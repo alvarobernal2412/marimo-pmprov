@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3
+
+### Added
+- `Sync` knows when a course is closed: a save the server refuses because the course's closing time has passed gives the status
+  `closed` ("This course is closed, so your work is no longer saved. What you saved before is kept.") and is not retried. Restoring
+  still works, so a closed course can be read.
+
 ## 0.4.2
 
 ### Changed
