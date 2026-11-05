@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6
+
+### Changed
+- The player stays in view while you read the annotations: the sidebar no longer scrolls as a whole, only the annotation list does.
+- A closed annotation reads "Step 3: first 30 characters…" (the step number is the one the player shows) so the list is an even
+  column; clicking it opens the whole note, tags and artifacts, and clicking again folds it shut.
+
 ## 0.4.5
 
 ### Fixed
