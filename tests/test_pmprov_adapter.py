@@ -433,3 +433,59 @@ def test_the_same_step_run_again_later_is_not_flagged(rt, event_log):
     _settle(rt)
 
     assert PmprovAdapter(rt).repeated_runs() == []
+
+
+# --- tags belong to a note, not to the step ---------------------------------------------------------------------------------------
+
+
+def _tags_by_note(adapter, state_id):
+    return {a.note: sorted(t.name for t in a.tags) for a in adapter.get_tree().nodes[state_id].annotations}
+
+
+def test_each_note_on_a_step_shows_only_its_own_tags(rt, event_log):
+    adapter, state_id, _, _ = _state_with_two_annotations(rt, event_log)
+
+    assert _tags_by_note(adapter, state_id) == {"first": ["only-first", "shared"], "second": ["shared"]}
+
+
+def test_a_note_without_tags_shows_none_even_when_another_note_on_the_step_has_some(rt, event_log):
+    state_id = _traced_state(rt, event_log)
+    adapter = PmprovAdapter(rt)
+    adapter.persist_annotation(state_id, {"note": "tagged", "tags": [{"name": "finding"}]})
+    adapter.persist_annotation(state_id, {"note": "plain"})
+
+    assert _tags_by_note(adapter, state_id) == {"tagged": ["finding"], "plain": []}
+
+
+def test_a_note_keeps_its_own_tags_after_a_restart(rt, event_log):
+    adapter, state_id, _, _ = _state_with_two_annotations(rt, event_log)
+
+    assert _tags_by_note(PmprovAdapter(rt), state_id) == {"first": ["only-first", "shared"], "second": ["shared"]}
+
+
+def test_editing_the_tags_of_one_note_leaves_the_other_alone(rt, event_log):
+    adapter, state_id, first, _ = _state_with_two_annotations(rt, event_log)
+
+    adapter.update_annotation(first, {"note": "first", "tags": [{"name": "intent"}]})
+
+    assert _tags_by_note(adapter, state_id) == {"first": ["intent"], "second": ["shared"]}
+    assert adapter._state_tag_names(state_id) == {"intent", "shared"}  # pmprov's own tags stay the union
+
+
+def test_removing_a_note_forgets_its_tags(rt, event_log, tmp_path):
+    import json
+
+    adapter, state_id, first, second = _state_with_two_annotations(rt, event_log)
+
+    adapter.remove_annotation(first)
+
+    assert list(json.loads((tmp_path / "note_tags.json").read_text(encoding="utf-8"))) == [second]
+
+
+def test_a_note_saved_before_tags_belonged_to_notes_still_shows_the_tags_of_its_step(rt, event_log, tmp_path):
+    state_id = _traced_state(rt, event_log)
+    adapter = PmprovAdapter(rt)
+    annotation_id = adapter.persist_annotation(state_id, {"note": "old", "tags": [{"name": "legacy"}]})
+    (tmp_path / "note_tags.json").unlink()  # how a history made by an earlier version looks
+
+    assert _tags_by_note(PmprovAdapter(rt), state_id) == {"old": ["legacy"]}

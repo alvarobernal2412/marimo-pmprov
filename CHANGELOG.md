@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5
+
+### Fixed
+- The tags of a note belong to that note. pmprov keeps tags per step, so every note on a step showed the tags of all the notes
+  on it (an intent and its findings, written on the same map, all showed `#intent #finding`). The adapter now keeps each note's
+  own tags in `note_tags.json` next to `provenance.db`, shows them on that note alone, and keeps pmprov's tags of the step as
+  their union. A note saved by an earlier version has no record and shows its step's tags, as before.
+
 ## 0.4.4
 
 ### Added

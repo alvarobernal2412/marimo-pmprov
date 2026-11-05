@@ -65,7 +65,8 @@ right it changes nothing.
   log, or a copy of it that a step produced) and, if the rest still adds up to more than 25 MB, the largest ones; both
   limits are arguments. It returns what it left out. The steps and notes are always included, and a step whose value
   was left out cannot restore it. Let pending writes land first (`rt.storage._executor.submit(lambda: None).result()`).
-- A note's picked element is kept in `picked_elements.json` next to `provenance.db`; keep it with the database.
+- A note's picked element is kept in `picked_elements.json` and its tags in `note_tags.json`, both next to `provenance.db`; keep
+  them with the database.
 - Use the same pmprov and DuckDB major versions on both machines; the database file is DuckDB's own format.
 - A working example of both modes with the fix built in, `analyst.py` and `reviewer.py`, is the `molab/bpm` folder of the
   BPI 2017 exercise.

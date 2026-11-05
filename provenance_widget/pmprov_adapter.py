@@ -41,6 +41,7 @@ from provenance_widget.interfaces import (
 # What a picked element is made of; the snapshot of its value is left out (it is a copy, and the value is stored).
 _PICKED_KEYS = ('artifactId', 'artifactName', 'granularity', 'detail')
 _PICKED_FILE = 'picked_elements.json'
+_TAGS_FILE = 'note_tags.json'
 
 _SNAPSHOT_CACHE_SIZE = 6  # restored artifact versions kept in memory
 _DEFAULT_TAG_COLOR = "#64748B"
@@ -77,9 +78,8 @@ class PmprovAdapter:
 
     def __init__(self, tracker: Any) -> None:
         self._rt = tracker
-        # annotation_id -> (state_id, tag names) for annotations persisted
-        # through this adapter, so update_annotation() can diff tags.
-        self._persisted_tags: dict[str, tuple[str, set[str]]] = {}
+        # annotation_id -> state_id for annotations persisted through this adapter (others are looked up).
+        self._note_states: dict[str, str] = {}
         # artifact_state_id -> restored object, LRU (see snapshot())
         self._values: OrderedDict[str, Any] = OrderedDict()
         # A recorded state never changes, so its node is built once. Rebuilding every node on every refresh
@@ -92,6 +92,7 @@ class PmprovAdapter:
         self._all_annotations_dirty = False
         self._tree_lock = threading.RLock()
         self._picked_lock = threading.Lock()
+        self._tags_lock = threading.Lock()
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -287,18 +288,20 @@ class PmprovAdapter:
         """Translate pmprov's stored annotations/tags for *state_id* into this
         widget's Annotation/Tag dataclasses.
 
-        pmprov tags aren't attached to individual annotations — they're
-        attached to the same (target_type, target_id) a state's annotations
-        are — so every annotation on a state shows that state's full tag set.
+        pmprov tags aren't attached to individual annotations: they hang off the
+        state. A note's own tags are therefore kept next to the database (see
+        `_read_note_tags`) and shown on that note alone. A note saved before that
+        existed has no record and shows its state's tags, as it always did.
         """
         raw_annotations = self._rt.storage.load_annotations("analysis_state", state_id)
         if not raw_annotations:
             return []
 
-        tags = [
+        state_tags = [
             Tag(name=t["name"], color=_DEFAULT_TAG_COLOR)
             for t in self._rt.storage.load_tags("analysis_state", state_id)
         ]
+        own_tags = self._read_note_tags()
         whole_step = [ArtifactRef(artifact_id=state_id, artifact_name=state_id, granularity="dataset")]
         picked = self._read_picked()
 
@@ -307,7 +310,11 @@ class PmprovAdapter:
                 annotation_id=a["annotation_id"],
                 title=(a["text"][:_TITLE_MAX_LEN] or "Untitled annotation"),
                 note=a["text"],
-                tags=tags,
+                tags=(
+                    [Tag(name=name, color=_DEFAULT_TAG_COLOR) for name in own_tags[a["annotation_id"]]]
+                    if a["annotation_id"] in own_tags
+                    else state_tags
+                ),
                 artifacts=self._picked_refs(picked.get(a["annotation_id"])) or whole_step,
                 author=self._author,
                 timestamp=a["created_at"],
@@ -336,7 +343,8 @@ class PmprovAdapter:
         names = self._tag_names(annotation_dict)
         for name in names:
             self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
-        self._persisted_tags[annotation_id] = (state_id, names)
+        self._remember_note_tags(annotation_id, names)
+        self._note_states[annotation_id] = state_id
         self._mark_annotations_dirty(state_id)
         return annotation_id
 
@@ -377,6 +385,37 @@ class PmprovAdapter:
             if picked.pop(annotation_id, None) is not None or self._picked_path().exists():
                 self._write_picked(picked)
 
+    # The tags of a note. pmprov keeps tags per state, so on its own every note on a step would show the tags of all of
+    # them. Each note's own names are kept in a second small file next to the database; pmprov's state tags stay the
+    # union of its notes' tags.
+    def _tags_path(self) -> Path:
+        return Path(self._rt.storage.db_path).parent / _TAGS_FILE
+
+    def _read_note_tags(self) -> dict[str, list[str]]:
+        try:
+            stored = json.loads(self._tags_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return stored if isinstance(stored, dict) else {}
+
+    def _write_note_tags(self, tags: dict) -> None:
+        path = self._tags_path()
+        scratch = path.with_name(path.name + ".tmp")
+        scratch.write_text(json.dumps(tags, indent=1), encoding="utf-8")
+        os.replace(scratch, path)
+
+    def _remember_note_tags(self, annotation_id: str, names: set[str]) -> None:
+        with self._tags_lock:
+            tags = self._read_note_tags()
+            tags[annotation_id] = sorted(names)
+            self._write_note_tags(tags)
+
+    def _forget_note_tags(self, annotation_id: str) -> None:
+        with self._tags_lock:
+            tags = self._read_note_tags()
+            if tags.pop(annotation_id, None) is not None:
+                self._write_note_tags(tags)
+
     @staticmethod
     def _picked_refs(stored: list | None) -> list[ArtifactRef]:
         return [
@@ -400,9 +439,9 @@ class PmprovAdapter:
 
     def _annotation_state(self, annotation_id: str) -> str | None:
         """The state an annotation is attached to (searched when it was persisted in an earlier session)."""
-        known = self._persisted_tags.get(annotation_id)
+        known = self._note_states.get(annotation_id)
         if known:
-            return known[0]
+            return known
         graph = self._rt.storage.load_graph(self._rt._history.history_id)
         for state in graph["states"]:
             stored = self._rt.storage.load_annotations("analysis_state", state["state_id"])
@@ -416,39 +455,34 @@ class PmprovAdapter:
     def remove_annotation(self, annotation_id: str) -> None:
         """Delete an annotation from pmprov, together with the tags that belonged to it.
 
-        pmprov tags hang off the state, not the annotation. Within a session the
-        adapter knows which tags an annotation added, and removes those no other
-        annotation on the state still carries. For an annotation persisted in an
-        earlier session that record is gone, so the tags the UI showed on it (the
-        state's tags) are removed only when it was the last annotation on the
-        state; otherwise they stay, since another annotation shows them too.
+        pmprov tags hang off the state, so a tag of this note is removed from the
+        state only when no other note on it carries it. A note saved before notes
+        had tags of their own shows the state's tags, so while one is left they all stay.
         """
         from models.annotations import AnnotatableType
 
         state_id = self._annotation_state(annotation_id)
-        owned = self._persisted_tags.get(annotation_id, (None, None))[1]
+        own_tags = self._read_note_tags()
+        owned = set(own_tags[annotation_id]) if annotation_id in own_tags else None
         self._rt.remove_annotation(annotation_id)
         self._forget_picked(annotation_id)
-        self._persisted_tags.pop(annotation_id, None)
+        self._forget_note_tags(annotation_id)
+        self._note_states.pop(annotation_id, None)
         self._mark_annotations_dirty(state_id)
         if state_id is None:
             return
         remaining = [a["annotation_id"] for a in self._rt.storage.load_annotations("analysis_state", state_id)]
         if owned is None:
             stale = self._state_tag_names(state_id) if not remaining else set()
-        elif any(other not in self._persisted_tags for other in remaining):
-            stale = set()  # an annotation of unknown ownership may still need them
+        elif any(other not in own_tags for other in remaining):
+            stale = set()  # a note without a record of its own still shows them
         else:
-            stale = owned - set().union(*(self._persisted_tags[o][1] for o in remaining)) if remaining else owned
+            stale = owned - set().union(*(set(own_tags[o]) for o in remaining)) if remaining else owned
         for name in stale:
             self._rt.untag(AnnotatableType.ANALYSIS_STATE, state_id, name)
 
     def update_annotation(self, annotation_id: str, annotation_dict: dict) -> None:
-        """Replace an annotation's text and sync its tags in pmprov.
-
-        Tags are the state's, so for an annotation from an earlier session the
-        change is made against the tags the UI showed on it (the state's tags).
-        """
+        """Replace an annotation's text and tags. Its tags are its own; pmprov's tags of the state follow as their union."""
         text = annotation_dict.get("note") or annotation_dict.get("title") or ""
         if not text:
             return
@@ -460,14 +494,22 @@ class PmprovAdapter:
         self._mark_annotations_dirty(state_id)
         if state_id is None:
             return
-        known = self._persisted_tags.get(annotation_id)
-        old_names = known[1] if known else self._state_tag_names(state_id)
+        own_tags = self._read_note_tags()
+        old_names = set(own_tags[annotation_id]) if annotation_id in own_tags else self._state_tag_names(state_id)
         new_names = self._tag_names(annotation_dict)
-        for name in new_names - old_names:
+        self._remember_note_tags(annotation_id, new_names)
+        self._note_states[annotation_id] = state_id
+        others = [
+            a["annotation_id"]
+            for a in self._rt.storage.load_annotations("analysis_state", state_id)
+            if a["annotation_id"] != annotation_id
+        ]
+        for name in new_names - self._state_tag_names(state_id):
             self._rt.tag(AnnotatableType.ANALYSIS_STATE, state_id, name)
-        for name in old_names - new_names:
-            self._rt.untag(AnnotatableType.ANALYSIS_STATE, state_id, name)
-        self._persisted_tags[annotation_id] = (state_id, new_names)
+        if all(other in own_tags for other in others):  # otherwise a note without a record may still show the tag
+            kept = set().union(*(set(own_tags[o]) for o in others)) if others else set()
+            for name in old_names - new_names - kept:
+                self._rt.untag(AnnotatableType.ANALYSIS_STATE, state_id, name)
 
     @staticmethod
     def _readable_params(raw_params: list[dict]) -> dict:
