@@ -40,6 +40,15 @@ function iconButton(name: "edit" | "trash", label: string, className: string, on
   return btn;
 }
 
+// The collapsed row shows the same number of characters for every note, so the
+// list reads as an even column; the whole text is one click away.
+const PREVIEW_CHARS = 30;
+
+function preview(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS).trimEnd()}…` : flat;
+}
+
 function parseTags(raw: string): { name: string; color: string }[] {
   return raw
     .split(/\s+/)
@@ -53,7 +62,7 @@ function parseTags(raw: string): { name: string; color: string }[] {
 // "Replay" to move the stepper to the state this annotation sits on.
 export function annotationCard(
   row: Row,
-  opts: { mode: string; model: AnyModel; isCurrent: boolean; canReplay: boolean; onReplay: () => void },
+  opts: { mode: string; model: AnyModel; isCurrent: boolean; canReplay: boolean; step: number | null; onReplay: () => void },
 ): HTMLElement {
   const { annotation } = row;
   const { mode, model } = opts;
@@ -79,6 +88,7 @@ export function annotationCard(
     card.classList.toggle("pw-ann-open", expanded);
     summary.setAttribute("aria-expanded", String(expanded));
     details.hidden = !expanded;
+    renderSummary();
   }
 
   function renderSummary(): void {
@@ -87,7 +97,11 @@ export function annotationCard(
     line.className = "pw-ann-line";
     const title = document.createElement("span");
     title.className = "pw-ann-title";
-    title.textContent = annotation.title;
+    // Closed: "Step 3: first characters…". Open: just "Step 3", the full text is below.
+    const label = opts.step === null ? "" : `Step ${opts.step}`;
+    const open = expandedIds.has(id);
+    const text = annotation.note || annotation.title;
+    title.textContent = open ? label || preview(text) : label ? `${label}: ${preview(text)}` : preview(text);
     line.appendChild(title);
     const time = document.createElement("time");
     time.className = "pw-timestamp";
@@ -112,10 +126,10 @@ export function annotationCard(
     details.innerHTML = "";
     actions.innerHTML = "";
 
-    if (annotation.note && annotation.note !== annotation.title) {
+    if (annotation.note || annotation.title) {
       const note = document.createElement("div");
       note.className = "pw-annotation-note";
-      note.textContent = annotation.note;
+      note.textContent = annotation.note || annotation.title;
       details.appendChild(note);
     }
 

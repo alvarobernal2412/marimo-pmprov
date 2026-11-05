@@ -12,6 +12,14 @@
 }
 .pw-root.pw-collapsed .pw-content { display: none; }
 
+/* Docked sidebar: marimo pads its scroller by 3.5rem above and 4rem below, so cap
+   the panel to what is left. The player and composer stay put; only the
+   annotation list scrolls. */
+.pw-root { display: flex; flex-direction: column; max-height: calc(100vh - 7.5rem); box-sizing: border-box; }
+.pw-content, .pw-body, .pw-body > div { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.pw-content > :not(.pw-body), .pw-body > div > * { flex: 0 0 auto; }
+.pw-body > div > .pw-commit-rail { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
 body.pw-picking-active * { cursor: crosshair !important; }
 
 .pw-segmented-control { display: flex; gap: 4px; margin-bottom: 8px; min-width: 0; }
@@ -251,8 +259,7 @@ body.pw-picking-active * { cursor: crosshair !important; }
 }
 .pw-ann-summary:focus-visible { outline: 2px solid #0EA5E9; outline-offset: -2px; border-radius: 6px; }
 .pw-ann-line { display: flex; align-items: baseline; gap: 8px; }
-.pw-ann-title { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pw-ann-open .pw-ann-title { white-space: normal; }
+.pw-ann-title { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .pw-ann-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
 .pw-ann-tags .pw-tag-chip { font-size: 10px; padding: 0 6px; }
 .pw-ann-details { padding: 0 8px 6px; }

@@ -2,7 +2,7 @@ import type { AnnotationJson, ArtifactRefJson, ProvenanceTreeJson } from "../typ
 import { GRANULARITY_LABEL } from "../components/artifact-badge";
 import { annotationCard } from "../components/annotation-card";
 import { collectAnnotations } from "../annotations";
-import { cursorStateId, latestStateId, moveCursor } from "../replay";
+import { cursorStateId, latestStateId, moveCursor, pathTo } from "../replay";
 import { icon } from "../components/icons";
 import { requestPdfExport } from "../export";
 import { highlightTargets } from "../highlight";
@@ -259,6 +259,8 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
         model,
         isCurrent: cursor !== null && row.stateId === cursor,
         canReplay: !!tree.nodes[row.stateId],
+        // the number the replay bar shows for this annotation's state
+        step: tree.nodes[row.stateId] ? pathTo(tree, row.stateId).length : null,
         onReplay: () => {
           moveCursor(model, tree, row.stateId, false, false); // the note's own target is highlighted below
           highlightTargets(row.annotation.artifacts ?? []);
