@@ -56,13 +56,16 @@ function flash(el: Located): void {
 export function highlightTargets(refs: TargetRef[]): void {
   const names = refs.map((ref) => ref.artifactName ?? "").filter((name) => name !== "");
   if (names.length === 0) return;
-  // The pinned element inside the artifact when it can be found, else the whole artifact.
-  highlightWhere(() => {
-    const picked = refs.filter((ref) => ref.detail);
-    return findTargets(names).map(
-      (root) => picked.map((ref) => locateDetail(root, ref.granularity ?? "", ref.detail ?? "")).find((el) => el) ?? root,
-    );
-  });
+  // The pinned element inside the artifact when it can be found, else the whole artifact. A map is drawn again when the
+  // step changes, which can take longer than the first look, so the pinned element is looked for until it shows up.
+  const picked = refs.filter((ref) => ref.detail);
+  highlightWhere(
+    () =>
+      findTargets(names).map(
+        (root) => picked.map((ref) => locateDetail(root, ref.granularity ?? "", ref.detail ?? "")).find((el) => el) ?? root,
+      ),
+    (found) => picked.length === 0 || found.every((el) => !el.classList.contains("pw-annotatable")),
+  );
 }
 
 // Stepping through a recorded analysis: point at what the step reached (the tables and maps the notebook shows under
@@ -79,7 +82,7 @@ export function highlightProducedBy(stateId: string): void {
   highlightWhere(() => findProducedBy(stateId));
 }
 
-function highlightWhere(find: () => Located[]): void {
+function highlightWhere(find: () => Located[], settled: (found: Located[]) => boolean = () => true): void {
   const started = Date.now();
   let flashed: Located[] = [];
 
@@ -102,6 +105,7 @@ function highlightWhere(find: () => Located[]): void {
       flashed = now;
       replaced.forEach(flash);
     }
+    if (!settled(now) && Date.now() - started < GIVE_UP_MS) setTimeout(recheck, LOOK_EVERY_MS);
   };
 
   setTimeout(look, FIRST_LOOK_MS);
