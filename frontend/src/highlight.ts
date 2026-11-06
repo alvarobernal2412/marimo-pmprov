@@ -5,8 +5,12 @@
 // The outline is set inline and animated with the Web Animations API: the elements live in the notebook, outside
 // the widget's shadow root, so the widget's stylesheet does not reach them.
 
+import { locateDetail, type Located } from "./locators";
+
 interface TargetRef {
   artifactName?: string;
+  granularity?: string;
+  detail?: string | null;
 }
 
 const FIRST_LOOK_MS = 500; // the notebook's cells re-run when the cursor moves; give them time to draw
@@ -32,7 +36,7 @@ export function findTargets(names: string[]): HTMLElement[] {
   return found;
 }
 
-function flash(el: HTMLElement): void {
+function flash(el: Located): void {
   const previous = { outline: el.style.outline, outlineOffset: el.style.outlineOffset };
   el.style.outline = `3px solid ${FLASH_COLOR}`;
   el.style.outlineOffset = "4px";
@@ -51,7 +55,13 @@ function flash(el: HTMLElement): void {
 export function highlightTargets(refs: TargetRef[]): void {
   const names = refs.map((ref) => ref.artifactName ?? "").filter((name) => name !== "");
   if (names.length === 0) return;
-  highlightWhere(() => findTargets(names));
+  // The pinned element inside the artifact when it can be found, else the whole artifact.
+  highlightWhere(() => {
+    const picked = refs.filter((ref) => ref.detail);
+    return findTargets(names).map(
+      (root) => picked.map((ref) => locateDetail(root, ref.granularity ?? "", ref.detail ?? "")).find((el) => el) ?? root,
+    );
+  });
 }
 
 // Stepping through a recorded analysis: point at what the step reached (the tables and maps the notebook shows under
@@ -68,9 +78,9 @@ export function highlightProducedBy(stateId: string): void {
   highlightWhere(() => findProducedBy(stateId));
 }
 
-function highlightWhere(find: () => HTMLElement[]): void {
+function highlightWhere(find: () => Located[]): void {
   const started = Date.now();
-  let flashed: HTMLElement[] = [];
+  let flashed: Located[] = [];
 
   const look = () => {
     const targets = find();
@@ -95,3 +105,4 @@ function highlightWhere(find: () => HTMLElement[]): void {
 
   setTimeout(look, FIRST_LOOK_MS);
 }
+

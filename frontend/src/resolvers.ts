@@ -35,7 +35,7 @@ function inPath(path: EventTarget[], candidate: Element | null): boolean {
 
 // A table header cell's name: the first piece of text in it. marimo's header also holds the dtype and the
 // distinct-value count under the name, which would otherwise run into it ("Attributestrunique: 12").
-function headerName(cell: Element | null | undefined): string | null {
+export function headerName(cell: Element | null | undefined): string | null {
   if (!cell) return null;
   const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -43,6 +43,32 @@ function headerName(cell: Element | null | undefined): string | null {
     if (text) return text;
   }
   return cell.textContent?.trim() ?? null;
+}
+
+// A cell is recorded as "row 2, column amount = 30". The row number is a position in what the table shows at pick
+// time, so the value is recorded too: on replay it tells whether that position still holds the same cell (the table
+// may have been sorted, filtered or paged differently), and lets the cell be found elsewhere when it moved.
+const MAX_CELL_TEXT = 60;
+
+export function cellText(cell: Element): string {
+  return (cell.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_CELL_TEXT);
+}
+
+export function cellDetail(row: number, column: string | null, value: string): string {
+  const where = column ? `row ${row}, column ${column}` : `row ${row}`;
+  return value ? `${where} = ${value}` : where;
+}
+
+export interface CellRef {
+  row: number;
+  column: string | null;
+  value: string | null; // null in details recorded before the value was kept
+}
+
+export function parseCellDetail(detail: string): CellRef | null {
+  const m = /^row (\d+)(?:, column (.*?))?(?: = ([\s\S]*))?$/.exec(detail);
+  if (!m) return null;
+  return { row: Number(m[1]), column: m[2] ?? null, value: m[3] ?? null };
 }
 
 // Built in: plain HTML tables (mo.ui.table renders one inside its shadow
@@ -62,8 +88,7 @@ registerDetailResolver({
       }
       const tbody = tr?.parentElement;
       const rowIndex = tr && tbody ? Array.from(tbody.children).indexOf(tr) : -1;
-      const detail = columnName ? `row ${rowIndex}, column ${columnName}` : `row ${rowIndex}`;
-      return { granularity: "cell", detail };
+      return { granularity: "cell", detail: cellDetail(rowIndex, columnName, cellText(td)) };
     }
 
     const th = clickTarget.closest("th");
@@ -100,3 +125,4 @@ registerDetailResolver({
     return null;
   },
 });
+
