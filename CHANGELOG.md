@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+- Replay finds the pinned cell, node or link of a map that has to be drawn again. Moving the stepper redraws the maps of the
+  notebook, which for a large map takes longer than the first look at it, and Replay then stayed on the outline of the whole map.
+  It now keeps looking, for a few seconds, until the pinned element is there.
+
 ## 0.5.0
 
 ### Added
