@@ -1,9 +1,9 @@
 // The reverse of the detail resolvers (resolvers.ts): given the artifact's element and the granularity and detail that
 // were recorded when a pick was made, find the element that was pinned. Returns null when it cannot be found with
 // confidence, so the caller falls back to marking the whole artifact instead of pointing at the wrong thing.
-import { cellText, headerName, parseCellDetail } from "./resolvers";
+import { cellText, headerName, parseCellDetail, sankeyLinkDetail } from "./resolvers";
 
-export type Located = HTMLElement;
+export type Located = HTMLElement | SVGElement;
 
 // Every element under `root`, looking through shadow roots (marimo tables and Plotly charts render inside them).
 function elementsUnder(root: Element): Element[] {
@@ -45,6 +45,22 @@ function locateCell(all: Element[], detail: string): Located | null {
   return holders.length === 1 ? (cellOf(holders[0]) ?? null) : null;
 }
 
+interface SankeyElement extends Element {
+  __data__?: { index?: number; node?: { label?: string }; link?: unknown };
+}
+
+function locateSankey(all: Element[], granularity: string, detail: string): Located | null {
+  const nodes = all.filter((e) => e.classList.contains("sankey-node")) as SankeyElement[];
+  if (granularity === "node") {
+    const hit = nodes.find((n) => n.__data__?.node?.label === detail);
+    return (hit?.querySelector("rect") as SVGElement | null) ?? null;
+  }
+  const labels = (i: number) => String(nodes.find((n) => n.__data__?.index === i)?.__data__?.node?.label ?? i);
+  const links = all.filter((e) => e.classList.contains("sankey-link")) as SankeyElement[];
+  const hit = links.find((l) => l.__data__ && sankeyLinkDetail(l.__data__ as never, labels) === detail);
+  return (hit as unknown as SVGElement | undefined) ?? null;
+}
+
 export function locateDetail(root: HTMLElement, granularity: string, detail: string): Located | null {
   const all = elementsUnder(root);
   switch (granularity) {
@@ -52,6 +68,9 @@ export function locateDetail(root: HTMLElement, granularity: string, detail: str
       return locateCell(all, detail);
     case "column":
       return (all.find((e) => e.tagName === "TH" && headerName(e) === detail) as HTMLElement | undefined) ?? null;
+    case "node":
+    case "link":
+      return locateSankey(all, granularity, detail);
     default:
       return null;
   }
