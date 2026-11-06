@@ -126,3 +126,39 @@ registerDetailResolver({
   },
 });
 
+// Plotly Sankey (lcmaps): nodes and links are SVG elements carrying d3 data. A node is named by its label, a link by
+// "source -> target (link label)", so the detail survives a redraw (indexes do not).
+interface SankeyDatum {
+  index?: number;
+  node?: { label?: string };
+  link?: { label?: string; source?: { index?: number; node?: { label?: string } }; target?: { index?: number; node?: { label?: string } } };
+}
+
+export function sankeyLinkDetail(d: SankeyDatum, labels: (i: number) => string): string | null {
+  const l = d.link;
+  if (!l || l.source?.index === undefined || l.target?.index === undefined) return null;
+  return `${labels(l.source.index)} -> ${labels(l.target.index)} (${l.label ?? ""})`;
+}
+
+registerDetailResolver({
+  name: "plotly-sankey",
+  resolve(path) {
+    for (const node of path) {
+      if (!(node instanceof Element)) continue;
+      const datum = (node as unknown as { __data__?: SankeyDatum }).__data__;
+      if (!datum) continue;
+      if (node.classList.contains("sankey-node") && datum.node?.label !== undefined) {
+        return { granularity: "node", detail: datum.node.label };
+      }
+      if (node.classList.contains("sankey-link")) {
+        const svg = node.closest("svg");
+        const nodes = Array.from(svg?.querySelectorAll("g.sankey-node") ?? []);
+        const labels = (i: number) =>
+          String((nodes.find((n) => (n as unknown as { __data__: SankeyDatum }).__data__?.index === i) as unknown as { __data__: SankeyDatum } | undefined)?.__data__?.node?.label ?? i);
+        const detail = sankeyLinkDetail(datum, labels);
+        if (detail) return { granularity: "link", detail };
+      }
+    }
+    return null;
+  },
+});

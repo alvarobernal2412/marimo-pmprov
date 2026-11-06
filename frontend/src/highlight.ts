@@ -37,6 +37,7 @@ export function findTargets(names: string[]): HTMLElement[] {
 }
 
 function flash(el: Located): void {
+  if (el instanceof SVGElement) return flashSvg(el);
   const previous = { outline: el.style.outline, outlineOffset: el.style.outlineOffset };
   el.style.outline = `3px solid ${FLASH_COLOR}`;
   el.style.outlineOffset = "4px";
@@ -105,4 +106,13 @@ function highlightWhere(find: () => Located[]): void {
 
   setTimeout(look, FIRST_LOOK_MS);
 }
-
+
+// Plotly redraws and restyles its marks, so an SVG target is marked with a separate overlay clone, not by restyling it.
+function flashSvg(el: SVGElement): void {
+  const overlay = el.cloneNode(false) as SVGElement;
+  overlay.removeAttribute("class");
+  overlay.setAttribute("style", `fill:none;stroke:${FLASH_COLOR};stroke-width:4;pointer-events:none`);
+  el.parentNode?.appendChild(overlay);
+  const pulse = overlay.animate([{ opacity: 1 }, { opacity: 0.15 }, { opacity: 1 }, { opacity: 0.15 }, { opacity: 1 }], { duration: 3200 });
+  pulse.onfinish = pulse.oncancel = () => overlay.remove();
+}
