@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+- Replay points at what an annotation pinned, not at the whole artifact. A pinned table cell or column is outlined in the table,
+  and a pinned node or link of a Plotly Sankey (such as a Linear Continuous Process Mapper map) is outlined on the map. The picker
+  can now pin a Sankey node or link; a node is recorded by its label and a link as `source -> target (label)`.
+- A pinned cell is recorded with its value (`row 2, column amount = 30`). On replay the recorded row is used while it still holds
+  that value; if the table was sorted, filtered or paged differently, the one row that holds it is used. When the value is in
+  several rows, in none, or on another page, the whole table is outlined instead of a wrong cell. A cell recorded by an earlier
+  version has no value and is found by its row, as before.
+- `frontend/src/locators.ts`: the lookup from a recorded pin back to its element, the counterpart of the detail resolvers.
+  Pins it cannot find, and kinds without a locator, keep the outline around the whole artifact.
+
 ## 0.4.6
 
 ### Changed
