@@ -3,7 +3,7 @@ import { compactNodeCard, nodeCard } from "../components/node-card";
 import { renderInspect } from "./inspect";
 import type { TreeNavState } from "../nav-state";
 import { collectAnnotations } from "../annotations";
-import { cursorStateId, moveCursor, pathTo } from "../replay";
+import { cursorStateId, isInitial, moveCursor, pathTo } from "../replay";
 import { renderReplayBar } from "./replay-bar";
 
 interface AnyModel {
@@ -132,7 +132,8 @@ export function renderTree(container: HTMLElement, model: AnyModel): void {
   // just extended it. The curated view reads the same stashed path to know
   // which branch is "active" — see views/curated.ts.
   const navState = model as unknown as TreeNavState;
-  const cursorId = reviewer ? cursorStateId(model, tree) : null;
+  const cursorAt = reviewer ? cursorStateId(model, tree) : null;
+  const cursorId = cursorAt && !isInitial(cursorAt) ? cursorAt : null; // before the first step there is no state to inspect
   if (reviewer && cursorId) {
     // the replay cursor decides which branch is open, so the tree always
     // reflects where the stepper is

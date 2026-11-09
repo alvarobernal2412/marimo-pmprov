@@ -526,3 +526,34 @@ def test_pdf_export_does_not_wait_for_the_source_storage_queue():
 def test_panel_empty_hint_is_empty_unless_the_notebook_sets_one():
     assert ProvenancePanel().widget.empty_hint == ""
     assert ProvenancePanel(empty_hint="Press Pick, then Add.").widget.empty_hint == "Press Pick, then Add."
+
+
+# --- the initial state, before the first recorded step ------------------------------------------------------------------------------
+
+
+def test_a_reviewer_can_stand_before_the_first_step():
+    from provenance_widget.snapshot import INITIAL_STATE
+
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    assert panel._cursor_from({"stateId": INITIAL_STATE}) == INITIAL_STATE
+    assert panel._cursor_from({}) == panel.latest_state_id  # a replay that never moved is at the latest state
+    assert ProvenancePanel(source=MockProvenanceSource(), mode="analyst")._cursor_from({"stateId": INITIAL_STATE}) is None
+
+
+def test_nothing_is_computed_at_the_initial_state():
+    from provenance_widget.snapshot import INITIAL_STATE
+
+    snap = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer").snapshot(INITIAL_STATE)
+    assert snap.step == 0 and not snap.is_live
+    assert snap.status("event_log") == "not_computed" and snap.get("event_log") is None
+    assert "Not computed yet" in snap.missing("event_log")
+
+
+def test_the_replay_cursor_follows_the_reviewer_to_the_initial_state():
+    from provenance_widget.snapshot import INITIAL_STATE
+
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    seen = []
+    panel.on_replay(seen.append)
+    panel.widget.replay = {"stateId": INITIAL_STATE, "params": {}, "isLatest": False}
+    assert seen == [INITIAL_STATE]

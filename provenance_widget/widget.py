@@ -13,7 +13,7 @@ import traitlets
 
 from provenance_widget.interfaces import EmptyProvenanceSource, ProvenanceSource
 from provenance_widget.serialize import tree_to_json
-from provenance_widget.snapshot import Snapshot
+from provenance_widget.snapshot import INITIAL_STATE, Snapshot
 
 _log = logging.getLogger(__name__)
 
@@ -523,14 +523,14 @@ class ProvenancePanel:
             return None
         nodes = self.widget.tree.get("nodes") or {}
         state_id = replay.get("stateId")
-        if state_id in nodes:
+        if state_id == INITIAL_STATE or state_id in nodes:
             return state_id
         return self.latest_state_id
 
     def on_replay(self, callback) -> None:
         """Call `callback(state_id)` whenever the reviewer steps to another
-        recorded state (always the state itself, `Latest` included). Analysts
-        get None."""
+        recorded state (always the state itself, `Latest` included, and
+        `INITIAL_STATE` for the start, before the first step). Analysts get None."""
         self.widget.observe(lambda change: callback(self._cursor_from(change["new"])), names="replay")
 
     def reactive_cursor(self, state_factory):
@@ -556,6 +556,9 @@ class ProvenancePanel:
         """
         if state_id is None:
             return Snapshot(state_id=None)
+        if state_id == INITIAL_STATE:
+            # before the first step: nothing is bound, so every variable reads as "not computed yet"
+            return Snapshot(state_id=INITIAL_STATE, operation="initial state", step=0, bound=frozenset())
         node = (self.widget.tree.get("nodes") or {}).get(state_id, {})
         bound: frozenset[str] | None = None
         error: str | None = None
