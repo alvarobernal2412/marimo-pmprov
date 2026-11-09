@@ -83,6 +83,7 @@ export function highlightProducedBy(stateId: string): void {
 }
 
 function highlightWhere(find: () => Located[], settled: (found: Located[]) => boolean = () => true): void {
+  stopBlinking(); // a new replay ends the previous one
   const started = Date.now();
   let flashed: Located[] = [];
 
@@ -111,12 +112,45 @@ function highlightWhere(find: () => Located[], settled: (found: Located[]) => bo
   setTimeout(look, FIRST_LOOK_MS);
 }
 
+// A node or a link of a map is small and a short pulse is easy to miss, so it blinks until the reviewer moves on: a click
+// or Escape, the next replay, or BLINK_MAX_MS, so that an idle page does not blink forever.
+const BLINK_PERIOD_MS = 700; // one way, on to off; a full blink takes twice this
+const BLINK_MAX_MS = 60000;
+const blinking = new Set<() => void>();
+
+function stopBlinking(): void {
+  for (const stop of [...blinking]) stop();
+}
+
 // Plotly redraws and restyles its marks, so an SVG target is marked with a separate overlay clone, not by restyling it.
 function flashSvg(el: SVGElement): void {
   const overlay = el.cloneNode(false) as SVGElement;
   overlay.removeAttribute("class");
-  overlay.setAttribute("style", `fill:none;stroke:${FLASH_COLOR};stroke-width:4;pointer-events:none`);
+  overlay.setAttribute(
+    "style",
+    `fill:${FLASH_COLOR};fill-opacity:0.35;stroke:${FLASH_COLOR};stroke-width:4;pointer-events:none;filter:drop-shadow(0 0 3px #000)`,
+  );
   el.parentNode?.appendChild(overlay);
-  const pulse = overlay.animate([{ opacity: 1 }, { opacity: 0.15 }, { opacity: 1 }, { opacity: 0.15 }, { opacity: 1 }], { duration: 3200 });
-  pulse.onfinish = pulse.oncancel = () => overlay.remove();
+  // Fades from fully on to nearly off and back, easing at both ends, so it reads as a soft pulse and not a flicker.
+  const blink = overlay.animate([{ opacity: 1 }, { opacity: 0.12 }], {
+    duration: BLINK_PERIOD_MS,
+    iterations: Infinity,
+    direction: "alternate",
+    easing: "ease-in-out",
+  });
+  const timer = setTimeout(stop, BLINK_MAX_MS);
+  function stop(): void {
+    clearTimeout(timer);
+    blinking.delete(stop);
+    document.removeEventListener("pointerdown", stop, true);
+    document.removeEventListener("keydown", onKey, true);
+    blink.cancel();
+    overlay.remove();
+  }
+  function onKey(event: KeyboardEvent): void {
+    if (event.key === "Escape") stop();
+  }
+  blinking.add(stop);
+  document.addEventListener("pointerdown", stop, true);
+  document.addEventListener("keydown", onKey, true);
 }
