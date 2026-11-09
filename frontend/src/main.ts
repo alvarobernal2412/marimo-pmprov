@@ -7,6 +7,7 @@ import { armPicker } from "./picker";
 import { armGutterAffordance } from "./gutter";
 import { icon } from "./components/icons";
 import { sendAgainWhenBackOnline } from "./reconnect";
+import { armSidebarResize } from "./sidebar-resize";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -48,6 +49,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     if (treePortal.style.display !== "none") positionTreePortal();
   });
   collapseObserver.observe(root);
+  // the panel may not be on the page yet when it is first drawn, so look for the sidebar around it a few times
+  [0, 300, 1500].forEach((delay) => setTimeout(() => root.isConnected && armSidebarResize(root), delay));
 
   const pickBtn = document.createElement("button");
   pickBtn.className = "pw-pick-btn";
