@@ -249,7 +249,8 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
   if (rows.length === 0) {
     const empty = document.createElement("div");
     empty.className = "pw-node-no-annotations";
-    empty.textContent = mode === "analyst" ? "None yet. Add the first one above." : "No annotations in this analysis.";
+    const hint = (model.get("empty_hint") as string | undefined) || "";
+    empty.textContent = mode === "analyst" ? hint || "None yet. Add the first one above." : "No annotations in this analysis.";
     rail.appendChild(empty);
   }
   rows.forEach((row) =>

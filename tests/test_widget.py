@@ -521,3 +521,8 @@ def test_pdf_export_does_not_wait_for_the_source_storage_queue():
     finally:
         blocked.set()
         panel.wait_for_persistence(timeout=20)
+
+
+def test_panel_empty_hint_is_empty_unless_the_notebook_sets_one():
+    assert ProvenancePanel().widget.empty_hint == ""
+    assert ProvenancePanel(empty_hint="Press Pick, then Add.").widget.empty_hint == "Press Pick, then Add."
