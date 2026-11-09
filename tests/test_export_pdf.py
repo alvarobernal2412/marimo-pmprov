@@ -253,3 +253,40 @@ def test_settings_are_printed_only_when_asked_for():
     rows = collect_rows(TREE, [{"stateId": "s2", "annotation": _annotation("a", "x", "2026-01-01T10:00:00Z")}], [], {}, {})
     assert "year = 2020" not in text_of(build_pdf(rows, None, compress=False))
     assert "year = 2020" in text_of(build_pdf(rows, None, compress=False, include_settings=True))
+
+
+class _TupleStepSource(_SnapshotSource):
+    """A step that returned ``figure, meta = ...``: the annotation's variable cannot be told from the step alone."""
+
+    def __init__(self, values, bound):
+        super().__init__(values)
+        self.bound = bound
+
+    def snapshot_bindings(self, state_id):
+        return set(self.values)
+
+    def variable_for_artifact(self, state_id, artifact_id):
+        return None
+
+    def variables_for_artifact(self, state_id, artifact_id):
+        return list(self.bound)
+
+
+def _panel_with(source):
+    panel = ProvenancePanel(source, mode="reviewer")
+    panel.widget.tree = {"nodes": {"s1": _node("s1", None, "draw_map")}}
+    ref = {"artifactId": "s1", "artifactName": "process_map", "granularity": "chart_selection", "detail": None}
+    panel.widget.commits = [{"stateId": "s1", "annotation": _annotation("a", "x", "2026-01-01T10:00:00Z", artifacts=[ref])}]
+    return panel
+
+
+def test_a_tuple_step_shows_the_one_variable_that_is_a_table_or_figure():
+    frame = pd.DataFrame({"a": [1, 2]})
+    panel = _panel_with(_TupleStepSource({"map_table": frame, "map_meta": {"nodes": 3}}, ["map_table", "map_meta"]))
+    text = text_of(panel.export_pdf())
+    assert "could not be recovered" not in text and "Table 1. process_map at step 1" in text
+
+
+def test_a_tuple_step_with_two_things_to_show_is_not_guessed():
+    panel = _panel_with(_TupleStepSource({"one": pd.DataFrame({"a": [1]}), "two": pd.DataFrame({"b": [2]})}, ["one", "two"]))
+    assert "could not be recovered" in text_of(panel.export_pdf())

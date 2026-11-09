@@ -258,6 +258,21 @@ class PmprovAdapter:
         changed = [n for n, v in bindings.items() if before.get(n) != v]
         return changed[0] if len(changed) == 1 else None
 
+    def variables_for_artifact(self, state_id: str, artifact_id: str) -> list[str]:
+        """Names of the variables the step that produced *artifact_id* added or changed, in binding order.
+
+        More than one when the step returns a tuple (``figure, meta = ...``), which `variable_for_artifact` cannot choose
+        from. Empty when the step is not known.
+        """
+        self.settle()
+        bindings = self._bindings(state_id) or self._legacy_sources(state_id)
+        graph = self._rt.storage.load_graph(self._rt._history.history_id)
+        step = next((s for s in graph["steps"] if s["output_state_id"] == artifact_id), None)
+        if step is None:
+            return []
+        before = self._bindings(step["input_state_id"])
+        return [n for n, v in bindings.items() if before.get(n) != v]
+
     def repeated_runs(self, min_length: int = DEFAULT_MIN_LENGTH):
         """Sequences of `min_length` or more steps that were run again, with the same arguments (see repeats.py).
 

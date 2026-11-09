@@ -424,11 +424,27 @@ class ProvenancePanel:
             if name is None and candidate in bound:
                 name = candidate
         if name is None:
-            return None
+            return self._shown_by_tuple_step(row, ref)
         try:
             return source.snapshot(row.state_id, [name]).get(name)
         except Exception:
             return None
+
+    def _shown_by_tuple_step(self, row, ref: dict):
+        """The output of a step that returns several variables (``figure, meta = ...``), when exactly one of them is a table
+        or a figure. With none or several to show it is not known which the annotation meant, so nothing is guessed."""
+        source = self._source
+        if not hasattr(source, "variables_for_artifact"):
+            return None
+        from provenance_widget.export_pdf import is_displayable
+
+        try:
+            names = source.variables_for_artifact(row.state_id, ref.get("artifactId", ""))
+            values = source.snapshot(row.state_id, names) if len(names) > 1 else {}
+        except Exception:
+            return None
+        shown = [n for n in names if n in values and is_displayable(values[n])]
+        return values[shown[0]] if len(shown) == 1 else None
 
     def remove_annotation(self, annotation_id: str) -> None:
         """Remove an annotation (hides it in the UI and deletes it in the source)."""
