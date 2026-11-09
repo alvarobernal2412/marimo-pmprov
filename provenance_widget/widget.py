@@ -33,6 +33,8 @@ class ProvenanceWidget(anywidget.AnyWidget):
     visible_tabs = traitlets.List(["curated", "tree"]).tag(sync=True)
     # The Tree tab is opt-in and fixed at construction (ProvenancePanel(show_tree=...)).
     show_tree = traitlets.Bool(False).tag(sync=True)
+    # What the analyst's list says while it has no annotation yet; empty means the built-in line (set at construction).
+    empty_hint = traitlets.Unicode("").tag(sync=True)
     selection = traitlets.Dict({}).tag(sync=True)
     commits = traitlets.List([]).tag(sync=True)
     # True once a notebook binds its cells to the replay cursor (`reactive_cursor`). The stepper tells the reviewer
@@ -68,6 +70,8 @@ class ProvenancePanel:
     stepper), so a reader of the notebook cannot switch themselves into it.
     The Tree tab is hidden unless `show_tree=True` (or `tabs` includes
     "tree"); like the persona, it can't be changed from the UI.
+    `empty_hint` replaces the line the analyst's list shows while there is no annotation yet, for a course that wants to
+    say how to write one.
     """
 
     def __init__(
@@ -78,6 +82,7 @@ class ProvenancePanel:
         tabs: list[str] | None = None,
         show_tree: bool | None = None,
         report_title: str = "Annotated analysis report",
+        empty_hint: str = "",
     ):
         self._source = source if source is not None else EmptyProvenanceSource()
         if mode == "student":  # the analyst persona's former name
@@ -106,6 +111,7 @@ class ProvenancePanel:
             visible_tabs=visible_tabs,
             active_tab=active_tab,
             show_tree=show_tree,
+            empty_hint=empty_hint,
         )
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0
