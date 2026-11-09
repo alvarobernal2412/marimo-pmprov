@@ -264,6 +264,14 @@ def _table(frame: Any, width: float, styles: dict):
     return table, detail
 
 
+def is_displayable(obj: Any) -> bool:
+    """Whether the report can draw *obj* as a table or a figure, without drawing it."""
+    if hasattr(obj, "head") and hasattr(obj, "shape") and hasattr(obj, "columns") and len(obj.shape) == 2:
+        return True
+    module = type(obj).__module__
+    return module.startswith(("plotly", "matplotlib", "altair")) or hasattr(obj, "to_image") or hasattr(obj, "savefig")
+
+
 def render_artifact(obj: Any, width: float, styles: dict):
     """(flowable, kind, detail) for a value, kind being 'Table' or 'Figure'. Never raises."""
     from reportlab.platypus import Preformatted

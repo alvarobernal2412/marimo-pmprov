@@ -489,3 +489,16 @@ def test_a_note_saved_before_tags_belonged_to_notes_still_shows_the_tags_of_its_
     (tmp_path / "note_tags.json").unlink()  # how a history made by an earlier version looks
 
     assert _tags_by_note(PmprovAdapter(rt), state_id) == {"old": ["legacy"]}
+
+
+@needs_bindings
+def test_a_step_that_returns_a_tuple_names_every_variable_it_bound(rt, event_log):
+    rt.trace_step(func=lambda df: (df.head(1), {"rows": len(df)}), func_name="split", raw_line="frame, info = split(event_log)",
+                  args=[event_log], kwargs={})
+    state = rt._current_state_id
+    _settle(rt)
+    adapter = PmprovAdapter(rt)
+
+    assert adapter.variable_for_artifact(state, state) is None  # two variables: which one is meant is not known
+    assert sorted(adapter.variables_for_artifact(state, state)) == ["frame", "info"]
+    assert adapter.variables_for_artifact(state, "no-such-state") == []
