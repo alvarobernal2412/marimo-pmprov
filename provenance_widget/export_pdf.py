@@ -18,6 +18,7 @@ from typing import Any, Callable
 from xml.sax.saxutils import escape
 
 from .element_snapshot import figure_png
+from .report_targets import describe, mark_sankey
 
 _FONT_DIR = Path(__file__).parent / "fonts"
 _FONT = "PWSans"
@@ -272,6 +273,25 @@ def is_displayable(obj: Any) -> bool:
     return module.startswith(("plotly", "matplotlib", "altair")) or hasattr(obj, "to_image") or hasattr(obj, "savefig")
 
 
+def _is_plain_mapping(obj: Any) -> bool:
+    """A small dict of numbers and words, such as the counts a summary step returns."""
+    return (
+        isinstance(obj, dict)
+        and 0 < len(obj) <= 30
+        and all(v is None or isinstance(v, (bool, int, float, str)) for v in obj.values())
+    )
+
+
+def _plain_value(value: Any) -> str:
+    if isinstance(value, bool) or value is None:
+        return "" if value is None else str(value)
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:,.0f}" if value.is_integer() else f"{value:,.4g}"
+    return str(value)
+
+
 def render_artifact(obj: Any, width: float, styles: dict):
     """(flowable, kind, detail) for a value, kind being 'Table' or 'Figure'. Never raises."""
     from reportlab.platypus import Preformatted
@@ -286,6 +306,10 @@ def render_artifact(obj: Any, width: float, styles: dict):
         if len(lines) > _MAX_TEXT_LINES:
             lines = [*lines[:_MAX_TEXT_LINES], "..."]
         return Preformatted("\n".join(line.encode("ascii", "replace").decode() for line in lines), styles["mono"]), "Text", ""
+    if _is_plain_mapping(obj):
+        import pandas as pd
+
+        obj = pd.DataFrame({"name": [str(key).replace("_", " ") for key in obj], "value": [_plain_value(v) for v in obj.values()]})
     if hasattr(obj, "head") and hasattr(obj, "shape") and hasattr(obj, "columns") and len(obj.shape) == 2:
         try:
             table, detail = _table(obj, width, styles)
@@ -408,6 +432,39 @@ def _stamp(timestamp: str) -> str:
         return timestamp or "unknown time"
 
 
+def _task_of(row: "Row") -> int | None:
+    """The number of the task an annotation is tagged with (`task8`, `task 9`), or None."""
+    for tag in row.annotation.get("tags") or []:
+        match = re.fullmatch(r"task[\s_-]*(\d+)", str(tag.get("name", "")).strip(), re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _grouped(rows: list["Row"]) -> list[tuple[int | None, list["Row"]]]:
+    """The rows by task, in the order the tasks were first written about and in time order within a task.
+    Without a single task tag everything is one group, as before."""
+    order: list[int | None] = []
+    groups: dict[int | None, list] = {}
+    for row in rows:
+        task = _task_of(row)
+        if task not in groups:
+            order.append(task)
+            groups[task] = []
+        groups[task].append(row)
+    if order == [None]:
+        return [(None, rows)]
+    return [(task, groups[task]) for task in order]
+
+
+def _written(stamps: list[str]) -> str:
+    """When the annotations were written: one time when the first and the last were written in the same minute."""
+    if not stamps:
+        return ""
+    first, last = _stamp(min(stamps, key=_time_of)), _stamp(max(stamps, key=_time_of))
+    return f", written {first}" if first == last else f", written between {first} and {last}"
+
+
 def _display_name(ref: dict, step: int | None) -> str:
     """The target's name; a stored annotation only knows its state id, which says nothing to a reader."""
     name = ref.get("artifactName") or ref.get("artifactId") or "artifact"
@@ -418,6 +475,9 @@ def _display_name(ref: dict, step: int | None) -> str:
 
 def _target_text(ref: dict, step: int | None) -> str:
     text = _display_name(ref, step)
+    plain = describe(ref.get("granularity"), ref.get("detail"))
+    if plain:
+        return f"{text}: {plain}"
     granularity = (ref.get("granularity") or "").replace("_", " ")
     if granularity:
         text += f" ({granularity})"
@@ -505,7 +565,7 @@ def build_pdf(
     summary = (
         f"<b>{len(rows)}</b> annotation{'s' if len(rows) != 1 else ''}"
         + (f" across <b>{len(steps)}</b> analysis step{'s' if len(steps) != 1 else ''}" if steps else "")
-        + (f", written between {_stamp(min(stamps, key=_time_of))} and {_stamp(max(stamps, key=_time_of))}" if stamps else "")
+        + _written(stamps)
         + ". Entries are listed in the order they were written, each with its tags, the step in the provenance "
         "record and the output it targets as the analysis showed it at that step."
     )
@@ -516,14 +576,24 @@ def build_pdf(
             "refer to are not included. Use a pmprov-backed history to embed them."
         )
         story += [box(notice, "#FFFBEB", "#FCD34D"), Spacer(1, 6)]
-    story.append(Paragraph("Annotations", styles["section"]))
-    story.append(HRFlowable(width="100%", thickness=0.6, color=_RULE, spaceAfter=2))
+    groups = _grouped(rows)
+    if len(groups) == 1:  # no task tags: one list, as before
+        story.append(Paragraph("Annotations", styles["section"]))
+        story.append(HRFlowable(width="100%", thickness=0.6, color=_RULE, spaceAfter=2))
 
     if not rows:
         story.append(Paragraph("No annotations have been recorded yet.", styles["body"]))
 
     counters = {"Table": 0, "Figure": 0, "Text": 0}
-    for number, row in enumerate(rows, start=1):
+    shown: dict[tuple, str] = {}  # a map drawn for one step and element is drawn once; later entries point back to it
+    ordered = [(task, row) for task, group in groups for row in group]
+    current: object = object()
+    for number, (task, row) in enumerate(ordered, start=1):
+        if len(groups) > 1 and task != current:
+            current = task
+            story.append(CondPageBreak(6 * cm))
+            story.append(Paragraph("Other annotations" if task is None else f"Task {task}", styles["section"]))
+            story.append(HRFlowable(width="100%", thickness=0.6, color=_RULE, spaceAfter=2))
         annotation = row.annotation
         note = annotation.get("note") or ""
         entry_title = (annotation.get("title") or "").strip()
@@ -577,14 +647,22 @@ def build_pdf(
                 what = name if name.startswith("output of") else f"The output {name}"
                 block.append(Paragraph(_para(f"{what[0].upper() + what[1:]} could not be recovered."), styles["field"]))
                 continue
+            value, marked = mark_sankey(value, ref.get("granularity"), ref.get("detail"))
+            key = (row.state_id, ref.get("artifactName"), ref.get("granularity"), ref.get("detail"))
+            if key in shown:
+                block.append(Paragraph(_para(f"Same as {shown[key]}."), styles["field"]))
+                continue
             flowable, kind, detail = render_artifact(value, width, styles)
             counters[kind] += 1
+            shown[key] = f"{kind} {counters[kind]}"
             label = name[0].upper() + name[1:] if name.startswith("output") else name
             caption = f"<font name='{_FONT}-Semibold' color='{_INK}'>{kind} {counters[kind]}.</font> {_para(label)}"
             if row.step and not name.startswith("output of step"):
                 caption += _para(f" at step {row.step}")
             if detail:
                 caption += _para(f" ({detail})")
+            if marked:
+                caption += _para(": the pinned element is in colour, the rest is faded")
             block += [Spacer(1, 6), KeepTogether([flowable, Paragraph(caption, styles["caption"])])]
         block.append(HRFlowable(width="100%", thickness=0.4, color=_RULE, spaceBefore=4))
         # start an entry on a fresh page rather than strand its heading above a table or chart
