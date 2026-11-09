@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3
+
+### Fixed
+- The PDF export draws the output of a step that returns several variables (`figure, meta = ...`). It used to say that the output
+  could not be recovered, because the step does not say which of its variables an annotation is about. When exactly one of them is a
+  table or a figure, that one is used; when none or several are, nothing is guessed and the report says so, as before.
+
 ## 0.5.2
 
 ### Changed
