@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.3
+## 0.6.0
 
 ### Fixed
 - The PDF export draws the output of a step that returns several variables (`figure, meta = ...`). It used to say that the output
