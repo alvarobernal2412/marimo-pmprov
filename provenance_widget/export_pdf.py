@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any, Callable
 from xml.sax.saxutils import escape
 
+from . import element_snapshot
 from .element_snapshot import figure_png
 from .report_targets import describe, mark_sankey
 
@@ -27,6 +28,7 @@ _MAX_TABLE_ROWS = 10
 _MAX_TABLE_COLUMNS = 7
 _MAX_CELL_CHARS = 28
 _MAX_TEXT_LINES = 40
+NOT_DRAWN = "not drawn"  # the detail of a figure the report could only describe
 
 
 class PdfUnavailable(RuntimeError):
@@ -316,15 +318,20 @@ def render_artifact(obj: Any, width: float, styles: dict):
             return table, "Table", detail
         except Exception:
             pass
-    png = _figure_png(obj)
+    png = _figure_png(obj, install_browser=True)  # exporting a report may wait for the browser that draws a Plotly figure
     if png is not None:
         try:
             return _image(png, width), "Figure", ""
         except Exception:
             pass
     if type(obj).__module__.startswith("plotly"):
-        text = "Interactive Plotly figure: install the kaleido package to embed it as an image."
-        return Preformatted(text, styles["mono"]), "Figure", ""
+        problem = element_snapshot.last_problem or ""
+        text = "Interactive Plotly figure that could not be drawn as an image."
+        text += " It needs the kaleido package and a Chrome browser (`plotly_get_chrome` installs one)."
+        if problem:
+            text += f" Reason: {problem[:200]}"
+        lines = [line for chunk in text.split(". ") for line in (chunk[i : i + 110] for i in range(0, max(len(chunk), 1), 110))]
+        return Preformatted("\n".join(lines), styles["mono"]), "Figure", NOT_DRAWN
     lines = repr(obj).encode("ascii", "replace").decode().splitlines()
     if len(lines) > _MAX_TEXT_LINES:
         lines = [*lines[:_MAX_TEXT_LINES], "..."]
@@ -661,7 +668,7 @@ def build_pdf(
                 caption += _para(f" at step {row.step}")
             if detail:
                 caption += _para(f" ({detail})")
-            if marked:
+            if marked and detail != NOT_DRAWN:
                 caption += _para(": the pinned element is in colour, the rest is faded")
             block += [Spacer(1, 6), KeepTogether([flowable, Paragraph(caption, styles["caption"])])]
         block.append(HRFlowable(width="100%", thickness=0.4, color=_RULE, spaceBefore=4))
