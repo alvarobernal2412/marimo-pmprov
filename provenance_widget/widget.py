@@ -33,6 +33,10 @@ class ProvenanceWidget(anywidget.AnyWidget):
     visible_tabs = traitlets.List(["curated", "tree"]).tag(sync=True)
     # The Tree tab is opt-in and fixed at construction (ProvenancePanel(show_tree=...)).
     show_tree = traitlets.Bool(False).tag(sync=True)
+    # The player sends a ping right behind a move of the replay cursor; the kernel answers it once the notebook has redrawn for that
+    # move (messages are handled one at a time), which is how the player knows to stop saying that it is rebuilding the page.
+    replay_ping = traitlets.Dict({}).tag(sync=True)
+    replay_pong = traitlets.Dict({}).tag(sync=True)
     # What the analyst's list says while it has no annotation yet; empty means the built-in line (set at construction).
     empty_hint = traitlets.Unicode("").tag(sync=True)
     selection = traitlets.Dict({}).tag(sync=True)
@@ -136,6 +140,7 @@ class ProvenancePanel:
         self.widget.observe(self._on_removed_changed, names="removed_annotations")
         self.widget.observe(self._on_edited_changed, names="edited_annotations")
         self.widget.observe(self._on_mode_changed, names="mode")
+        self.widget.observe(self._on_replay_ping, names="replay_ping")
         self.widget.observe(self._on_show_tree_changed, names="show_tree")
         self.widget.observe(self._on_export_requested, names="export_request")
         # Sources like PmprovAdapter grow on their own as the notebook runs
@@ -510,6 +515,10 @@ class ProvenancePanel:
             # analysis as it stands now. "python" only if nothing is recorded yet.
             state_id = self.latest_state_id or "python"
         self.widget.commits = [*self.widget.commits, {"stateId": state_id, "annotation": annotation_dict}]
+
+    def _on_replay_ping(self, change) -> None:
+        """Answer the player's ping. It is handled after the move it follows, so by now the notebook has redrawn for it."""
+        self.widget.replay_pong = dict(change["new"])
 
     def _cursor_from(self, replay: dict) -> str | None:
         """The recorded state a reviewer is looking at.

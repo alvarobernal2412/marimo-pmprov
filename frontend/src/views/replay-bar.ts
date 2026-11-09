@@ -1,6 +1,7 @@
 import type { ProvenanceTreeJson } from "../types";
 import { icon } from "../components/icons";
 import { cursorStateId, isInitial, latestStateId, moveCursor, moveToInitial, nextChoices, pathTo } from "../replay";
+import { onReplayStatus, replayStatus, type ReplayStatus } from "../replay-status";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -97,6 +98,9 @@ export function renderReplayBar(container: HTMLElement, model: AnyModel): void {
     evt.preventDefault();
   });
 
+  // While the notebook catches up with the step, and when it has: a step that draws nothing says so.
+  if (model.get("outputs_follow_cursor")) bar.appendChild(statusLine(model, cursor, stepNumber));
+
   if (choices.length > 1) {
     const fork = document.createElement("div");
     fork.className = "pw-replay-fork";
@@ -154,4 +158,37 @@ export function renderReplayBar(container: HTMLElement, model: AnyModel): void {
     note.textContent = "Viewing an earlier step. Notebook outputs still show the latest run.";
     bar.appendChild(note);
   }
+}
+
+// "Rebuilding the notebook for step N" with a spinner while the page catches up; afterwards, for a step that drew no table or map of
+// its own, a line that says so, so that a quiet step does not look like a stuck one. The line follows the status as it changes.
+function statusLine(model: AnyModel, cursor: string, stepNumber: number): HTMLElement {
+  const line = document.createElement("div");
+  line.className = "pw-replay-status";
+  line.setAttribute("role", "status");
+  line.setAttribute("aria-live", "polite");
+  const paint = (status: ReplayStatus): void => {
+    line.replaceChildren();
+    line.classList.remove("pw-replay-status-quiet");
+    line.hidden = true;
+    if (status.stateId !== cursor) return;
+    if (status.phase === "working") {
+      const spinner = document.createElement("span");
+      spinner.className = "pw-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      const words = stepNumber === 0 ? "Going back to the start…" : `Rebuilding the notebook for step ${stepNumber}…`;
+      line.append(spinner, document.createTextNode(words));
+      line.hidden = false;
+    } else if (status.phase === "done" && !status.visual && !isInitial(cursor)) {
+      line.classList.add("pw-replay-status-quiet");
+      line.textContent = "This step draws no table or map of its own; the page shows what the steps before it made.";
+      line.hidden = false;
+    }
+  };
+  paint(replayStatus(model));
+  const stop = onReplayStatus(model, (status) => {
+    if (!line.isConnected) return stop(); // the bar was drawn again
+    paint(status);
+  });
+  return line;
 }
