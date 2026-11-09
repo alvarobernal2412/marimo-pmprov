@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+### Changed
+- Replay makes a pinned node or link of a map blink until the reviewer moves on. A short pulse was easy to miss on a small mark.
+  The mark is filled and outlined in amber, fades in and out, and stops on a click or Escape, when another annotation is replayed,
+  or after a minute. Tables, cells and whole artifacts keep the short outline.
+
 ## 0.5.1
 
 ### Fixed
