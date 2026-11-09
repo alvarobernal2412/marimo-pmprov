@@ -290,3 +290,92 @@ def test_a_tuple_step_shows_the_one_variable_that_is_a_table_or_figure():
 def test_a_tuple_step_with_two_things_to_show_is_not_guessed():
     panel = _panel_with(_TupleStepSource({"one": pd.DataFrame({"a": [1]}), "two": pd.DataFrame({"b": [2]})}, ["one", "two"]))
     assert "could not be recovered" in text_of(panel.export_pdf())
+
+
+# --- what the report says about a pin, and how it marks it ---------------------------------------------------------------
+
+
+def _sankey():
+    import plotly.graph_objects as go
+
+    return go.Figure(go.Sankey(
+        node={"label": ["START", "{A_Create Application}", "{A_Create Application, A_Concept}"], "color": ["#aaaaaa", "#ff7f0e", "#9467bd"]},
+        link={"source": [0, 1], "target": [1, 2], "value": [10, 8], "label": ["A_Create Application (10)", "A_Concept (8)"],
+              "color": ["rgba(255, 127, 14, 0.6)", "rgba(148, 103, 189, 0.6)"]},
+    ))
+
+
+def test_a_pinned_link_is_worded_for_a_reader():
+    from provenance_widget.report_targets import describe
+
+    assert describe("link", "START -> {A_Create Application} (A_Create Application (10))") == "link into A_Create Application, 10 cases"
+    assert describe("link", "A_Incomplete -> A_Pending (A_Pending (4937))") == "link into A_Pending, 4,937 cases (from A_Incomplete to A_Pending)"
+    assert describe("link", "{A, B} -> {A, B, O_Sent (mail and online)} (O_Sent (mail and online) (17228))") == "link into O_Sent (mail and online), 17,228 cases"
+    assert describe("node", "{EMPTY TRACE}") == "node {EMPTY TRACE}"
+    assert describe("cell", "row 1, column a = 2") is None and describe("link", None) is None
+
+
+def test_the_pinned_link_is_in_colour_and_the_rest_is_faded():
+    from provenance_widget.report_targets import mark_sankey
+
+    figure = _sankey()
+    marked, done = mark_sankey(figure, "link", "{A_Create Application} -> {A_Create Application, A_Concept} (A_Concept (8))")
+    assert done and marked is not figure
+    link = marked.data[0].link
+    assert link.color[1].startswith("rgba(245, 158, 11") and link.color[0].endswith("0.2)")
+    assert marked.data[0].node.color[0].endswith("0.2)")
+    assert "A_Concept, 8 cases" in marked.layout.annotations[0].text
+    assert figure.data[0].link.color[1] == "rgba(148, 103, 189, 0.6)"  # the recorded figure is not changed
+
+
+def test_a_pinned_node_keeps_its_colour():
+    from provenance_widget.report_targets import mark_sankey
+
+    marked, done = mark_sankey(_sankey(), "node", "{A_Create Application}")
+    assert done and marked.data[0].node.color[1] == "rgba(255, 127, 14, 1)" and marked.data[0].node.color[2].endswith("0.2)")
+
+
+def test_a_pin_that_is_not_found_leaves_the_figure_alone():
+    from provenance_widget.report_targets import mark_sankey
+
+    figure = _sankey()
+    for granularity, detail in (("link", "X -> Y (Z (1))"), ("node", "nowhere"), ("cell", "row 1"), ("link", None)):
+        assert mark_sankey(figure, granularity, detail) == (figure, False)
+    assert mark_sankey("not a figure", "link", "a -> b (c (1))") == ("not a figure", False)
+
+
+def test_a_dict_of_counts_is_drawn_as_a_table():
+    ref = {"artifactId": "s2", "artifactName": "summary", "granularity": "dataset", "detail": None}
+    rows = collect_rows(TREE, [{"stateId": "s2", "annotation": _annotation("a", "x", "2026-01-01T10:00:00Z", artifacts=[ref])}], [], {}, {})
+    text = text_of(build_pdf(rows, lambda row, ref: {"cases": 31509, "events": 1202267}, compress=False))
+    assert "Table 1. summary at step 2" in text and "31,509" in text and "{'cases'" not in text
+
+
+def test_entries_are_grouped_under_a_heading_per_task():
+    def entry(annotation_id, stamp, tags):
+        return {"stateId": "s2", "annotation": _annotation(annotation_id, annotation_id, stamp, tags=tags)}
+
+    commits = [entry("first", "2026-01-01T10:00:00Z", ["task9"]), entry("second", "2026-01-01T10:01:00Z", ["task8"]),
+               entry("third", "2026-01-01T10:02:00Z", ["task9"])]
+    text = text_of(build_pdf(collect_rows(TREE, commits, [], {}, {}), None, compress=False))
+    assert text.index("Task 9") < text.index("first") < text.index("third") < text.index("Task 8") < text.index("second")
+    plain = text_of(build_pdf(collect_rows(TREE, [entry("only", "2026-01-01T10:00:00Z", [])], [], {}, {}), None, compress=False))
+    assert "Task " not in plain and "Annotations" in plain
+
+
+def test_a_map_drawn_for_the_same_step_and_element_is_drawn_once():
+    ref = {"artifactId": "s2", "artifactName": "process_map", "granularity": "chart_selection", "detail": None}
+    commits = [{"stateId": "s2", "annotation": _annotation(f"a{i}", "x", f"2026-01-01T10:0{i}:00Z", artifacts=[ref])} for i in range(2)]
+    text = text_of(build_pdf(collect_rows(TREE, commits, [], {}, {}), lambda row, ref: pd.DataFrame({"a": [1]}), compress=False))
+    assert text.count("Table 1. process_map") == 1 and "Same as Table 1." in text and "Table 2." not in text
+
+
+def test_the_header_names_one_time_when_all_were_written_in_the_same_minute():
+    def entry(annotation_id, stamp):
+        return {"stateId": "s2", "annotation": _annotation(annotation_id, annotation_id, stamp)}
+
+    same = text_of(build_pdf(collect_rows(TREE, [entry("a", "2026-01-01T10:00:05Z"), entry("b", "2026-01-01T10:00:50Z")], [], {}, {}), None, compress=False))
+    assert "written between" not in same and "written 01 Jan 2026" in same
+    apart = text_of(build_pdf(collect_rows(TREE, [entry("a", "2026-01-01T10:00:00Z"), entry("b", "2026-01-01T11:00:00Z")], [], {}, {}), None, compress=False))
+    assert "written between" in apart
+
