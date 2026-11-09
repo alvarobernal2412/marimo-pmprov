@@ -1,6 +1,7 @@
 import type { ProvenanceNodeJson, ProvenanceTreeJson } from "./types";
 import type { TreeNavState } from "./nav-state";
 import { highlightProducedBy } from "./highlight";
+import { startReplayStatus } from "./replay-status";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -79,6 +80,7 @@ export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: s
   model.set("selection", { ...selection, node: { pickedStateId: stateId } });
   model.set("replay", { stateId, params: node.params, isLatest: stateId === latestStateId(tree) });
   model.save_changes();
+  if (model.get("outputs_follow_cursor")) startReplayStatus(model, stateId); // says that the notebook is catching up
   if (highlight && model.get("outputs_follow_cursor")) highlightProducedBy(stateId); // only a notebook that redraws per step has them
 }
 
@@ -89,4 +91,5 @@ export function moveToInitial(model: AnyModel): void {
   model.set("selection", selection);
   model.set("replay", { stateId: INITIAL_STATE, params: {}, isLatest: false });
   model.save_changes();
+  if (model.get("outputs_follow_cursor")) startReplayStatus(model, INITIAL_STATE, true);
 }

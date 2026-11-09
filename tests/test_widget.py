@@ -557,3 +557,12 @@ def test_the_replay_cursor_follows_the_reviewer_to_the_initial_state():
     panel.on_replay(seen.append)
     panel.widget.replay = {"stateId": INITIAL_STATE, "params": {}, "isLatest": False}
     assert seen == [INITIAL_STATE]
+
+
+def test_the_kernel_answers_the_players_ping_so_it_can_stop_saying_it_is_rebuilding():
+    panel = ProvenancePanel(source=MockProvenanceSource(), mode="reviewer")
+    assert panel.widget.replay_pong == {}
+    panel.widget.replay_ping = {"token": "1700000000000-1"}
+    assert panel.widget.replay_pong == {"token": "1700000000000-1"}
+    panel.widget.replay_ping = {"token": "1700000000000-2"}
+    assert panel.widget.replay_pong == {"token": "1700000000000-2"}
