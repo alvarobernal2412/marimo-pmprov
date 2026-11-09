@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+
+### Added
+- The sidebar can be resized. When the panel is in marimo's sidebar, its right edge is a drag handle: hovering shows the resize cursor
+  and a line, dragging changes the width (220 px up to 70% of the window), and a double-click goes back to marimo's width. The width is
+  remembered in the browser and survives collapsing and reopening the sidebar.
+
 ## 0.8.0
 
 ### Added
