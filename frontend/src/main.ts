@@ -6,6 +6,7 @@ import { renderTree } from "./views/tree";
 import { armPicker } from "./picker";
 import { armGutterAffordance } from "./gutter";
 import { icon } from "./components/icons";
+import { sendAgainWhenBackOnline } from "./reconnect";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -15,6 +16,7 @@ interface AnyModel {
 }
 
 function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
+  sendAgainWhenBackOnline(model);
   (el as HTMLElement & { _pwTreePortal?: HTMLElement })._pwTreePortal?.remove();
   el.innerHTML = "";
   const root = document.createElement("div");
