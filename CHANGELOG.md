@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0
+
+### Added
+- `ProvenancePanel(empty_hint=...)`: the line the analyst's list shows while there is no annotation yet. A course can use it to say how
+  to write one (what to pick, which tags). Without it the list says "None yet. Add the first one above.", as before.
+
+### Fixed
+- An annotation written while the browser was offline is sent to the notebook when the browser is back online. Before, it stayed on
+  the page, never reached the notebook, and was lost on a reload.
+- Replay (and stepping) opens the tab that holds the table or map an annotation points at, so that it can be outlined. Before,
+  a target in a tab the reader was not on stayed out of sight.
+
+### Changed
+- A pinned table cell or column blinks until the reviewer clicks, presses Escape or replays another annotation, like a pinned node or
+  link of a map. A whole table or map keeps the short outline.
+
 ## 0.6.0
 
 ### Fixed
