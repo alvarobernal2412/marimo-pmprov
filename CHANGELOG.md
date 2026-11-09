@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1
+
+### Fixed
+- The PDF export draws a Plotly figure on a machine that has no Chrome browser, such as a hosted notebook. Plotly's image export
+  (kaleido) needs Chrome; the export now downloads one the first time it needs it (picking an element never does) and says why when
+  it cannot, instead of the misleading "install the kaleido package".
+
 ## 0.7.0
 
 ### Added
