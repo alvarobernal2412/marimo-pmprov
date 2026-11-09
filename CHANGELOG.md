@@ -7,6 +7,17 @@
   could not be recovered, because the step does not say which of its variables an annotation is about. When exactly one of them is a
   table or a figure, that one is used; when none or several are, nothing is guessed and the report says so, as before.
 
+### Changed
+- The PDF report shows which part of a map an annotation is about. For a Plotly Sankey (such as a Linear Continuous Process Mapper
+  map), the pinned node or link is drawn in colour with the rest faded, and its name and number of cases are written on the
+  figure. A pin that is not found, or that matches several marks, leaves the figure as it was.
+- The report words a pinned link or node plainly (`link into A_Cancelled, 6,840 cases`) instead of the recorded
+  `{...} -> {...} (A_Cancelled (6840))`.
+- Entries are grouped under a heading per task when they carry `task8`, `task 9`, ... tags. A map drawn for the same step and
+  element is drawn once; later entries say "Same as Figure n".
+- A small dict of numbers, such as the counts of a summary step, is drawn as a table, not as Python text.
+- The summary says "written 06 Nov 2026, 23:25" when the first and the last annotation were written in the same minute.
+
 ## 0.5.2
 
 ### Changed
