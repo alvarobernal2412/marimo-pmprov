@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+### Added
+- The player can stand before the first step. **Step 0 (start)** is the state where nothing has been computed yet: First and Back from
+  step 1 go there, and Next leaves it for step 1. Step *n* of the player is then the step whose result is on screen, and the first
+  Next shows what step 1 made. A notebook that reads `panel.snapshot(...)` sees nothing computed at the start; `INITIAL_STATE` (in
+  `provenance_widget.snapshot`) is the id the cursor has there.
+- While the notebook catches up with a step, the player says so: a spinner and "Rebuilding the notebook for step n...". The player
+  sends a ping (`replay_ping`) right behind the move and the kernel answers it (`replay_pong`) once the redraw is over. A step that
+  draws no table or map of its own then says that, so a quiet step does not look like a stuck one.
+
 ## 0.7.1
 
 ### Fixed
