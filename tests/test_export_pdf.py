@@ -379,3 +379,60 @@ def test_the_header_names_one_time_when_all_were_written_in_the_same_minute():
     apart = text_of(build_pdf(collect_rows(TREE, [entry("a", "2026-01-01T10:00:00Z"), entry("b", "2026-01-01T11:00:00Z")], [], {}, {}), None, compress=False))
     assert "written between" in apart
 
+
+# --- a Plotly figure on a machine without Chrome ---------------------------------------------------------------------------------
+
+_ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+class _NeedsChrome:
+    """Looks like a Plotly figure: it can only be drawn once a Chrome browser has been fetched."""
+
+    __module__ = "plotly.graph_objs._figure"
+    has_chrome = False
+
+    def to_image(self, format="png", scale=2):
+        if not _NeedsChrome.has_chrome:
+            raise RuntimeError("Kaleido requires Google Chrome to be installed.  Install it by running:  $ plotly_get_chrome")
+        return _ONE_PIXEL_PNG
+
+
+def _one_figure_report(figure):
+    ref = {"artifactId": "s2", "artifactName": "process_map", "granularity": "chart_selection", "detail": None}
+    rows = collect_rows(TREE, [{"stateId": "s2", "annotation": _annotation("a", "x", "2026-01-01T10:00:00Z", artifacts=[ref])}], [], {}, {})
+    return text_of(build_pdf(rows, lambda row, ref: figure, compress=False))
+
+
+@pytest.fixture
+def no_chrome(monkeypatch):
+    import plotly.io as pio
+
+    import provenance_widget.element_snapshot as snapshots
+
+    _NeedsChrome.has_chrome = False
+    monkeypatch.setattr(snapshots, "_browser_tried", False)
+    fetched = []
+    monkeypatch.setattr(pio, "get_chrome", lambda *a, **k: fetched.append(1) or setattr(_NeedsChrome, "has_chrome", True))
+    return fetched
+
+
+def test_a_report_fetches_the_browser_a_plotly_figure_needs(no_chrome):
+    text = _one_figure_report(_NeedsChrome())
+    assert no_chrome == [1]  # fetched once, on the way
+    assert "Figure 1. process_map at step 2" in text and "could not be drawn" not in text
+
+
+def test_a_report_says_why_a_figure_could_not_be_drawn(no_chrome, monkeypatch):
+    import plotly.io as pio
+
+    monkeypatch.setattr(pio, "get_chrome", lambda *a, **k: (_ for _ in ()).throw(OSError("no network")))
+    text = _one_figure_report(_NeedsChrome())
+    assert "could not be drawn as an image" in text and "Chrome" in text and "Reason:" in text
+
+
+def test_picking_never_downloads_the_browser(no_chrome):
+    from provenance_widget.element_snapshot import figure_png
+
+    assert figure_png(_NeedsChrome(), dpi=110, scale=1.5) is None and no_chrome == []

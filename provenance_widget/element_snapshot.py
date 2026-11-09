@@ -29,8 +29,38 @@ def _too_big_to_draw(figure: Any) -> bool:
     return False
 
 
-def figure_png(obj: Any, dpi: int = 200, scale: float = 2) -> bytes | None:
-    """PNG bytes for a matplotlib, Altair, Plotly or PIL figure, else None."""
+# Why the last figure could not be drawn, for a report to say. Plotly draws a figure with kaleido, which needs a Chrome browser on
+# the machine; a hosted notebook has none.
+last_problem: str | None = None
+_browser_tried = False
+
+
+def _fetch_browser() -> bool:
+    """Download the browser kaleido draws with, once. A big download, so only a report being exported does it."""
+    global _browser_tried
+    if _browser_tried:
+        return False
+    _browser_tried = True
+    try:
+        import plotly.io as pio
+
+        get = getattr(pio, "get_chrome", None)
+        if get is None:
+            import kaleido
+
+            get = kaleido.get_chrome_sync
+        get()
+        return True
+    except Exception:
+        return False
+
+
+def figure_png(obj: Any, dpi: int = 200, scale: float = 2, install_browser: bool = False) -> bytes | None:
+    """PNG bytes for a matplotlib, Altair, Plotly or PIL figure, else None (`last_problem` says why, when it is known).
+
+    With `install_browser`, a Plotly figure on a machine without Chrome first downloads one (once)."""
+    global last_problem
+    last_problem = None
     module = type(obj).__module__
     try:
         if module.startswith("matplotlib"):
@@ -43,12 +73,18 @@ def figure_png(obj: Any, dpi: int = 200, scale: float = 2) -> bytes | None:
 
             return vl_convert.vegalite_to_png(obj.to_dict(), scale=scale)
         if module.startswith("plotly"):
-            return obj.to_image(format="png", scale=scale)  # needs the kaleido package
+            try:
+                return obj.to_image(format="png", scale=scale)  # needs the kaleido package, and Chrome
+            except RuntimeError as problem:
+                if install_browser and "Chrome" in str(problem) and _fetch_browser():
+                    return obj.to_image(format="png", scale=scale)
+                raise
         if module.startswith("PIL"):
             buffer = io.BytesIO()
             obj.save(buffer, format="PNG")
             return buffer.getvalue()
-    except Exception:
+    except Exception as problem:
+        last_problem = " ".join(str(problem).split())
         return None
     return None
 
