@@ -13,6 +13,14 @@ interface ReplayState {
   isLatest?: boolean;
 }
 
+// The state before the first recorded step: nothing has been computed yet. A replay can start there, so that the first Next shows
+// what step 1 made and the step number in the player is the step whose result is on screen. It is not a node of the tree.
+export const INITIAL_STATE = "__initial__";
+
+export function isInitial(stateId: string | null | undefined): boolean {
+  return stateId === INITIAL_STATE;
+}
+
 // Time order = insertion order of tree.nodes (pmprov records states
 // sequentially), so the last key is always the most recent state.
 export function latestStateId(tree: ProvenanceTreeJson): string | null {
@@ -25,6 +33,7 @@ export function latestStateId(tree: ProvenanceTreeJson): string | null {
 // newest state as the tree grows instead of pinning to a stale one.
 export function cursorStateId(model: AnyModel, tree: ProvenanceTreeJson): string | null {
   const replay = (model.get("replay") as ReplayState) ?? {};
+  if (replay.stateId === INITIAL_STATE) return INITIAL_STATE;
   if (!replay.stateId || replay.isLatest || !tree.nodes[replay.stateId]) return latestStateId(tree);
   return replay.stateId;
 }
@@ -71,4 +80,13 @@ export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: s
   model.set("replay", { stateId, params: node.params, isLatest: stateId === latestStateId(tree) });
   model.save_changes();
   if (highlight && model.get("outputs_follow_cursor")) highlightProducedBy(stateId); // only a notebook that redraws per step has them
+}
+
+// Go back to before the first step.
+export function moveToInitial(model: AnyModel): void {
+  (model as unknown as TreeNavState)._pwTreePath = [];
+  const { node: _left, ...selection } = (model.get("selection") as Record<string, unknown>) ?? {};
+  model.set("selection", selection);
+  model.set("replay", { stateId: INITIAL_STATE, params: {}, isLatest: false });
+  model.save_changes();
 }

@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+# The state before the first recorded step: nothing has been computed yet. A reviewer can start a replay there, so that the first
+# step forward shows what step 1 made. It is not a node of the tree; the frontend uses the same id.
+INITIAL_STATE = "__initial__"
+
 
 @dataclass(frozen=True)
 class Snapshot:

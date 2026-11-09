@@ -226,6 +226,7 @@ body.pw-picking-active * { cursor: crosshair !important; }
 .pw-replay-delta, .pw-replay-params { font-size: 11px; color: #64748B; }
 .pw-replay-params { font-family: ui-monospace, monospace; word-break: break-all; }
 .pw-replay-note { font-size: 11px; color: #B45309; margin-top: 6px; }
+.pw-replay-start { font-size: 10px; background: #64748B; color: white; border-radius: 999px; padding: 1px 8px; text-transform: uppercase; }
 /* tree overlay: the stepper sits in a wide pane, so lay it out as one compact row */
 .pw-tree-portal-bar .pw-replay-bar,
 .pw-tree-header + .pw-replay-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
