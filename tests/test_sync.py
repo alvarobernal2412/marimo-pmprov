@@ -374,3 +374,42 @@ def test_a_note_is_on_the_server_within_a_few_seconds_by_default(service, tmp_pa
     sync = Sync(service.url, KEY, folder)
 
     assert sync.debounce <= 2.0 and sync.poll <= 1.0
+
+
+def _wait_for(condition, seconds=8):
+    deadline = time.time() + seconds
+    while not condition() and time.time() < deadline:
+        time.sleep(0.05)
+    return condition()
+
+
+def test_work_done_while_offline_is_sent_by_itself_when_the_connection_is_back(service, tmp_path):
+    folder = _history(tmp_path / "provenance")
+    sync = Sync("http://127.0.0.1:9", KEY, folder, debounce=0.2, poll=0.1, timeout=1)  # nobody is listening there
+    sync.start()
+    try:
+        (folder / "provenance.db").write_bytes(b"first annotation, offline")
+        assert _wait_for(lambda: sync.status.state == "offline")
+        (folder / "provenance.db").write_bytes(b"second annotation, still offline")
+        time.sleep(1.5)
+        assert service.stored == {} and sync.status.state == "offline"  # nothing reached the server, nothing was dropped
+
+        sync.url = service.url  # the connection is back; nobody touches the notebook
+        assert _wait_for(lambda: KEY in service.stored)
+    finally:
+        sync.stop(flush=False)
+
+    assert zipfile.ZipFile(io.BytesIO(service.stored[KEY][1])).read("provenance.db") == b"second annotation, still offline"
+    assert sync.status.state == "saved"
+
+
+def test_a_notebook_opened_offline_keeps_its_work_and_sends_it_later(service, tmp_path):
+    folder = _history(tmp_path / "provenance", b"work done before the connection dropped")
+    sync = Sync("http://127.0.0.1:9", KEY, folder, timeout=1)
+
+    assert sync.restore() == "failed" and sync.status.state == "offline"
+    assert (folder / "provenance.db").read_bytes() == b"work done before the connection dropped"  # not replaced by anything
+
+    sync.url = service.url
+    assert sync.push() is True
+    assert zipfile.ZipFile(io.BytesIO(service.stored[KEY][1])).read("provenance.db") == b"work done before the connection dropped"
