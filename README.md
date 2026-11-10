@@ -126,7 +126,7 @@ steps are recorded.
 
 ### Tagging notebook outputs so they can be picked
 
-Any table or chart you want the sidebar's "Pick from notebook" picker (and
+Any table or chart you want the sidebar's "Anchor" picker (and
 the hover "+" gutter affordance) to be able to target needs to be wrapped
 with `show_table` / `show_chart`:
 
