@@ -149,10 +149,10 @@ export function annotationCard(
     details.appendChild(actions);
 
     if (mode === "reviewer") {
-      const replayBtn = smallButton("Replay", "pw-replay-state-btn", opts.onReplay);
+      const replayBtn = smallButton("Jump to anchor", "pw-replay-state-btn", opts.onReplay);
       replayBtn.disabled = !opts.canReplay;
       replayBtn.title = opts.canReplay
-        ? "Replay: move the stepper to this annotation's state"
+        ? "Jump to anchor: move the stepper to this annotation's state and point at its anchor"
         : "No recorded state for this annotation";
       actions.appendChild(replayBtn);
       return;

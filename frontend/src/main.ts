@@ -60,12 +60,12 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     pickBtn.appendChild(icon("crosshair"));
     pickBtn.appendChild(document.createTextNode(text));
   }
-  setPickLabel("Pick");
-  pickBtn.title = "Pick an output from the notebook as the annotation target";
+  setPickLabel("Anchor");
+  pickBtn.title = "Anchor the annotation to an output of the notebook";
   function resetPickBtn(): void {
     armed = false;
     pickBtn.classList.remove("pw-pick-btn-armed");
-    setPickLabel("Pick");
+    setPickLabel("Anchor");
     document.body.classList.remove("pw-picking-active");
   }
   pickBtn.addEventListener("click", () => {
