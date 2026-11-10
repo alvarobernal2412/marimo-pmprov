@@ -368,13 +368,52 @@ def test_picked_element_survives_a_reload(rt, event_log, tmp_path):
     )
 
 
-def test_picked_element_is_kept_small(rt, event_log, tmp_path):
+TABLE_SNAPSHOT = {
+    "kind": "table", "columns": ["case", "activity"], "rows": [["c1", "A"]], "total_rows": 1, "total_columns": 2,
+}
+
+
+def test_the_picked_table_is_kept_with_the_note(rt, event_log):
+    # two tables built from the same step share its state id; only the snapshot says which of them was picked
     state_id = _traced_state(rt, event_log)
-    PmprovAdapter(rt).persist_annotation(state_id, {"note": "x", "artifacts": [{**PICKED, "artifactId": state_id}]})
+    picked = {**PICKED, "artifactId": state_id, "artifactName": "global_attributes", "snapshot": TABLE_SNAPSHOT}
+    PmprovAdapter(rt).persist_annotation(state_id, {"note": "a cell", "artifacts": [picked]})
+
+    reopened = PmprovAdapter(rt)  # a new session
+    stored = reopened.get_tree().nodes[state_id].annotations[0].artifacts[0]
+
+    assert stored.snapshot == TABLE_SNAPSHOT
+
+
+def test_the_report_draws_the_picked_table_after_a_reload(rt, event_log, monkeypatch):
+    pytest.importorskip("reportlab")
+    from provenance_widget import export_pdf
+    from provenance_widget.widget import ProvenancePanel
+
+    state_id = _traced_state(rt, event_log)
+    picked = {**PICKED, "artifactId": state_id, "artifactName": "global_attributes", "snapshot": TABLE_SNAPSHOT}
+    PmprovAdapter(rt).persist_annotation(state_id, {"note": "a cell", "artifacts": [picked]})
+
+    drawn = []
+    real = export_pdf.render_artifact
+    monkeypatch.setattr(export_pdf, "render_artifact", lambda value, *rest: (drawn.append(value), real(value, *rest))[1])
+    panel = ProvenancePanel(source=PmprovAdapter(rt), mode="analyst")  # a new session: the notes come from storage
+    panel.refresh()
+    panel.export_pdf()
+
+    assert [list(frame.columns) for frame in drawn] == [TABLE_SNAPSHOT["columns"]]  # not the step's own, bigger table
+
+
+def test_a_picture_is_not_kept_with_the_note(rt, event_log, tmp_path):
+    state_id = _traced_state(rt, event_log)
+    picture = {"kind": "image", "png": "A" * 50_000}
+    PmprovAdapter(rt).persist_annotation(
+        state_id, {"note": "x", "artifacts": [{**PICKED, "artifactId": state_id, "snapshot": picture}]}
+    )
 
     stored = (tmp_path / "picked_elements.json").read_text(encoding="utf-8")
 
-    assert "not stored" not in stored  # the snapshot is a copy of a value, not a reference
+    assert "AAAA" not in stored  # a picture is large, and a recorded figure is drawn from its step
 
 
 def test_a_note_without_a_picked_element_still_targets_the_whole_step(rt, event_log):
