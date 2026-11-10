@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0
+
+### Added
+- In reviewer mode, moving the player to a step (or pressing Replay on a note) opens the annotations written at that step and closes
+  the others, and the list scrolls to them. The reviewer can still open and close any note by hand; that stays until the player moves
+  again.
+
 ## 0.9.0
 
 ### Added
