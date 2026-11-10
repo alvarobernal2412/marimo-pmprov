@@ -65,6 +65,9 @@ class ArtifactRef:
     artifact_name: str
     granularity: str
     detail: str | None = None
+    # What the picked element showed (a table's head, a text), kept so the report can draw it again after a reload. None for a
+    # reference that carries none; a picture is not kept.
+    snapshot: dict | None = None
 
 
 @dataclass
