@@ -1,6 +1,6 @@
 import type { AnnotationJson, ArtifactRefJson, ProvenanceTreeJson } from "../types";
 import { GRANULARITY_LABEL } from "../components/artifact-badge";
-import { annotationCard } from "../components/annotation-card";
+import { annotationCard, openOnly } from "../components/annotation-card";
 import { collectAnnotations } from "../annotations";
 import { cursorStateId, latestStateId, moveCursor, pathTo } from "../replay";
 import { icon } from "../components/icons";
@@ -188,6 +188,8 @@ function renderExportButton(model: AnyModel, annotationCount: number): HTMLEleme
   return button;
 }
 
+const lastCursor = new WeakMap<object, string>(); // the step the list was last drawn for, per panel
+
 export function renderCurated(container: HTMLElement, model: AnyModel, pickButton?: HTMLElement): void {
   // Remember which composer field had focus (and its caret) so a re-render
   // triggered by new provenance data doesn't also steal the user's cursor.
@@ -244,6 +246,16 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
   }
 
   const cursor = mode === "reviewer" ? cursorStateId(model, tree) : null;
+  // The first draw and each move of the player open the notes of the step it stands on and close the rest. Drawing again for any other
+  // reason (new data, a note written) leaves the notes as the reviewer set them.
+  const moved = cursor !== null && lastCursor.get(model) !== cursor;
+  if (cursor !== null) lastCursor.set(model, cursor);
+  if (moved) {
+    openOnly(
+      rows.filter((row) => row.stateId === cursor).map((row) => row.annotation.annotationId),
+      rows.map((row) => row.annotation.annotationId),
+    );
+  }
   const rail = document.createElement("div");
   rail.className = "pw-commit-rail";
   if (rows.length === 0) {
@@ -270,4 +282,5 @@ export function renderCurated(container: HTMLElement, model: AnyModel, pickButto
     ),
   );
   container.appendChild(rail);
+  if (moved) rail.querySelector(".pw-ann-current")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }

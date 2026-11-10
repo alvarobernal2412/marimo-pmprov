@@ -19,6 +19,13 @@ interface Row {
 // provenance data changes), so a row you opened doesn't snap shut.
 const expandedIds = new Set<string>();
 
+// The reviewer moved to another step: the notes written at that step open and the others close. This is done once per move, so the
+// reviewer can still open and close any note after it.
+export function openOnly(open: Iterable<string>, all: Iterable<string>): void {
+  for (const id of all) expandedIds.delete(id);
+  for (const id of open) expandedIds.add(id);
+}
+
 function smallButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.className = `pw-card-action ${className}`;
