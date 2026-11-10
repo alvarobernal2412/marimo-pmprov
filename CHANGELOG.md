@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1
+
+### Fixed
+- The PDF export drew a different table from the one that was targeted, once the notebook had been reopened. A saved annotation kept
+  only the name and the step of its target, so the report looked the table up by step; two tables made from one step (a view and the
+  full log) were both drawn as the step's own. A saved annotation now keeps the snapshot of a picked table or text. Annotations saved
+  before this version carry none and still draw the step's table.
+
 ## 0.11.0
 
 ### Changed
