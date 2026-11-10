@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.0
+
+### Changed
+- The analyst's "Pick" button is now **Anchor**, and the reviewer's "Replay" button on a note is now **Jump to anchor**.
+
 ## 0.10.0
 
 ### Added
