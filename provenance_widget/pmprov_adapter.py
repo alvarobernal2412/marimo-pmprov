@@ -38,8 +38,11 @@ from provenance_widget.interfaces import (
     Tag,
 )
 
-# What a picked element is made of; the snapshot of its value is left out (it is a copy, and the value is stored).
+# What a picked element is made of. Its snapshot is kept when it is a table's head or a text: the value stored for the step is the
+# variable, which can be a bigger table than the one that was picked (several tables are made from one step), so the report needs the
+# picked one. A picture is left out (it is large, and a recorded figure is drawn from its step).
 _PICKED_KEYS = ('artifactId', 'artifactName', 'granularity', 'detail')
+_KEPT_SNAPSHOT_KINDS = ('table', 'text')
 _PICKED_FILE = 'picked_elements.json'
 _TAGS_FILE = 'note_tags.json'
 
@@ -383,7 +386,7 @@ class PmprovAdapter:
 
     def _remember_picked(self, annotation_id: str, artifacts: list | None) -> None:
         refs = [
-            {key: ref.get(key) for key in _PICKED_KEYS}
+            {**{key: ref.get(key) for key in _PICKED_KEYS}, **self._kept_snapshot(ref)}
             for ref in artifacts or []
             if isinstance(ref, dict) and ref.get("artifactName")
         ]
@@ -432,6 +435,13 @@ class PmprovAdapter:
                 self._write_note_tags(tags)
 
     @staticmethod
+    def _kept_snapshot(ref: dict) -> dict:
+        snapshot = ref.get("snapshot")
+        if isinstance(snapshot, dict) and (snapshot.get("kind") or "table") in _KEPT_SNAPSHOT_KINDS:
+            return {"snapshot": snapshot}
+        return {}
+
+    @staticmethod
     def _picked_refs(stored: list | None) -> list[ArtifactRef]:
         return [
             ArtifactRef(
@@ -439,6 +449,7 @@ class PmprovAdapter:
                 artifact_name=ref["artifactName"],
                 granularity=ref.get("granularity") or "dataset",
                 detail=ref.get("detail"),
+                snapshot=ref.get("snapshot") if isinstance(ref.get("snapshot"), dict) else None,
             )
             for ref in stored or []
             if isinstance(ref, dict) and ref.get("artifactName")

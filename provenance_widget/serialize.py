@@ -41,6 +41,7 @@ def tree_to_json(tree: ProvenanceTree) -> dict:
                             "artifactName": ar["artifact_name"],
                             "granularity": ar["granularity"],
                             "detail": ar["detail"],
+                            "snapshot": ar.get("snapshot"),
                         }
                         for ar in a["artifacts"]
                     ],
