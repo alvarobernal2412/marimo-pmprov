@@ -184,9 +184,22 @@ from provenance_widget.display import show_recorded_charts
 show_recorded_charts(adapter, cursor_state)  # the charts recorded up to the step the reviewer is on
 ```
 
-A source opts in by having `record_chart(artifact_id, artifact_name, settings, png=None)`; `PmprovAdapter` has it. The watcher reads
-the headings and labels of marimo's chart builder, so a marimo upgrade that changes it stops charts from being recorded (nothing else
-breaks): re-check after upgrading marimo.
+A source opts in by having `record_chart(artifact_id, artifact_name, settings, png=None)` (and, to take part in restoring below,
+`builder=None` and `charts_to_restore()`); `PmprovAdapter` has them. The watcher reads the headings and labels of marimo's chart
+builder, so a marimo upgrade that changes it stops charts from being recorded (nothing else breaks): re-check after upgrading marimo.
+
+### Resuming in another browser
+
+marimo keeps the chart builder of each table only in the browser (`localStorage`, under `marimo:charts:v2:<notebook file>`), so a
+browser that has never seen the analysis (another computer, another port, cleared site data) opens every table with an empty builder
+even though the history recorded each chart. With `capture_charts=True` the panel therefore keeps marimo's own saved tabs of the
+table's cell with each recorded chart, and on a resumed history (`init_marimo(..., fresh=False)`) hands them back to the page, which
+writes them where marimo reads them and **reloads the page once**: marimo reads that storage when the page starts. The charts then
+open as the analyst left them, in the live builder, not as pictures. It does nothing when the browser already has those tabs, which is
+the normal case, never overwrites a tab the browser already has, and never reloads twice for the same charts in one tab.
+
+Charts recorded before this existed carry no builder state and are not restored (a reviewer still sees them). The state is marimo's
+own config, so a marimo upgrade that changes its storage format makes the restore a no-op rather than an error.
 
 ## Export the annotations as a PDF
 
