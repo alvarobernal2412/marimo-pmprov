@@ -85,7 +85,7 @@ def recorded_charts(source, state_id: str | None) -> list[dict]:
             table = str(node.params.get("table", ""))
             settings = node.params.get("settings") or {}
             picture = source.snapshot(node.state_id, ["chart_image"]).get("chart_image")
-            png = figure_png(picture) if picture is not None else None
+            png = bytes(picture) if isinstance(picture, (bytes, bytearray)) else (figure_png(picture) if picture is not None else None)
             charts.append(
                 {"artifact_id": node.state_id, "name": _chart_title(table, settings), "table": table, "settings": settings, "png": png}
             )

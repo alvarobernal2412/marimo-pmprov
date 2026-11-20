@@ -69,22 +69,17 @@ def _map_category(name: str | None) -> StepCategory:
         return _DEFAULT_CATEGORY
 
 
-def _picture_of(png: bytes | None):
-    """A PIL image from PNG bytes, or None when there is none, it is not a PNG, or PIL is not installed."""
+def _picture_of(png: bytes | None) -> bytes | None:
+    """The PNG bytes of a chart's picture, or None when there is none or it is not a PNG.
+
+    Kept as the PNG itself, not as a decoded image: pmprov stores a decoded image as raw pixels (megabytes for a chart), which the
+    history's zip leaves out, while the PNG is a few kilobytes and the report draws it as it is.
+    """
     from provenance_widget.element_snapshot import _PNG_MAGIC
 
     if not png or bytes(png[:8]) != _PNG_MAGIC:
         return None
-    try:
-        import io
-
-        from PIL import Image
-
-        picture = Image.open(io.BytesIO(png))
-        picture.load()
-        return picture
-    except Exception:
-        return None
+    return bytes(png)
 
 
 def _chart_title(table_name: str, settings: dict) -> str:
@@ -121,9 +116,10 @@ class PmprovAdapter:
         self._tree_lock = threading.RLock()
         self._picked_lock = threading.Lock()
         self._tags_lock = threading.Lock()
-        # the settings last recorded for each table's chart, so a chart that has not changed is not recorded again
+        # the settings last recorded for each table's chart (by the table's name), so a chart that has not changed is not recorded
+        # again; read from the stored history the first time, so a restarted notebook does not repeat what it already holds
         self._chart_lock = threading.Lock()
-        self._last_chart: dict[str, dict] = {}
+        self._last_chart: dict[str, dict] | None = None
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -334,7 +330,7 @@ class PmprovAdapter:
         """Record a chart built in marimo's Visualize tab as a step of the history: which table it is about and its settings.
 
         The settings are what the chart builder showed (chart type, X, Y, aggregation, sort, color...), never the plotted data. With a
-        PNG of the chart, the step's output is that picture (the variable `chart_image`), which makes the chart an artifact like any
+        PNG of the chart, the step's output is those PNG bytes (the variable `chart_image`), which makes the chart an artifact like any
         other: it can be anchored, annotated, drawn in the PDF and shown again in reviewer mode.
 
         A call with the settings already recorded for that table returns None and records nothing. Otherwise returns
@@ -342,9 +338,11 @@ class PmprovAdapter:
         """
         settings = dict(settings)
         with self._chart_lock:
-            if self._last_chart.get(artifact_id) == settings:
+            if self._last_chart is None:
+                self._last_chart = self._charts_in_history()
+            if self._last_chart.get(artifact_name) == settings:
                 return None
-            self._last_chart[artifact_id] = settings
+            self._last_chart[artifact_name] = settings
         picture = _picture_of(png)
         chart_name = _chart_title(artifact_name, settings)
         self._rt.trace_step(
@@ -359,6 +357,18 @@ class PmprovAdapter:
         # an annotation targets the state that produced an output (see variable_for_artifact), so that is the chart's artifact id
         artifact = state_id if picture is not None else None
         return {"stateId": state_id, "artifactId": artifact, "artifactName": chart_name}
+
+    def _charts_in_history(self) -> dict[str, dict]:
+        """table name -> the settings of the latest chart recorded for it, from the stored steps (oldest first, so later ones win)."""
+        try:
+            nodes = self.get_tree().nodes.values()
+            return {
+                str(n.params.get("table", "")): dict(n.params.get("settings") or {})
+                for n in nodes
+                if n.operation.name == "visualize_chart"
+            }
+        except Exception:
+            return {}
 
     def _load_annotations(self, state_id: str) -> list[Annotation]:
         """Translate pmprov's stored annotations/tags for *state_id* into this
