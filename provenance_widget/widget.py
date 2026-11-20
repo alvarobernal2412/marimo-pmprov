@@ -11,9 +11,11 @@ import warnings
 import anywidget
 import traitlets
 
+from provenance_widget.element_snapshot import SNAPSHOT_IMAGE_MAX_BYTES
 from provenance_widget.interfaces import EmptyProvenanceSource, ProvenanceSource
 from provenance_widget.serialize import tree_to_json
 from provenance_widget.snapshot import INITIAL_STATE, Snapshot
+from provenance_widget.visualize import enable_chart_builder
 
 _log = logging.getLogger(__name__)
 
@@ -60,6 +62,24 @@ class ProvenanceWidget(anywidget.AnyWidget):
     # or {"requestId", "error"}).
     export_request = traitlets.Dict({}).tag(sync=True)
     export_result = traitlets.Dict({}).tag(sync=True)
+    # Charts built in marimo's Visualize tab: with capture_charts on (fixed at construction) the page watches the chart builder and
+    # sets chart_event ({"id", "artifactId", "artifactName", "settings"}) once a chart has settled; the panel records it.
+    capture_charts = traitlets.Bool(False).tag(sync=True)
+    chart_event = traitlets.Dict({}).tag(sync=True)
+    # the panel's answer to a chart_event once it is recorded: {"eventId", "stateId", "artifactId", "artifactName"}, so the page can
+    # mark the chart as the artifact it became (and the analyst can anchor an annotation to it)
+    chart_ack = traitlets.Dict({}).tag(sync=True)
+
+
+def _decode_png(encoded) -> bytes | None:
+    """The PNG a chart event carries (base64 text), or None when it is missing, not base64, or over the snapshot size limit."""
+    if not isinstance(encoded, str) or not encoded:
+        return None
+    try:
+        png = base64.b64decode(encoded, validate=True)
+    except Exception:
+        return None
+    return png if len(png) <= SNAPSHOT_IMAGE_MAX_BYTES else None
 
 
 _AUTO_REFRESH_INTERVAL_SECONDS = 0.75
@@ -76,6 +96,8 @@ class ProvenancePanel:
     "tree"); like the persona, it can't be changed from the UI.
     `empty_hint` replaces the line the analyst's list shows while there is no annotation yet, for a course that wants to
     say how to write one.
+    `capture_charts=True` shows marimo's Visualize button on tables (also in `marimo run`) and records each chart the analyst builds
+    there as a step, through the source's optional `record_chart(artifact_id, artifact_name, settings)`.
     """
 
     def __init__(
@@ -87,6 +109,7 @@ class ProvenancePanel:
         show_tree: bool | None = None,
         report_title: str = "Annotated analysis report",
         empty_hint: str = "",
+        capture_charts: bool = False,
     ):
         self._source = source if source is not None else EmptyProvenanceSource()
         if mode == "student":  # the analyst persona's former name
@@ -116,7 +139,11 @@ class ProvenancePanel:
             active_tab=active_tab,
             show_tree=show_tree,
             empty_hint=empty_hint,
+            capture_charts=capture_charts,
         )
+        if capture_charts:
+            enable_chart_builder()
+        self._handled_charts: set[str] = set()
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0
         # commits made while no analysis state was recorded yet (see _persist_commit)
@@ -143,6 +170,7 @@ class ProvenancePanel:
         self.widget.observe(self._on_replay_ping, names="replay_ping")
         self.widget.observe(self._on_show_tree_changed, names="show_tree")
         self.widget.observe(self._on_export_requested, names="export_request")
+        self.widget.observe(self._on_chart_event, names="chart_event")
         # Sources like PmprovAdapter grow on their own as the notebook runs
         # (a live pmprov RuntimeTracker being traced in the background) — for
         # those, poll and push updates automatically so tracked cells don't
@@ -289,6 +317,25 @@ class ProvenancePanel:
             pending, self._pending_commits = self._pending_commits, []
         for commit in pending:
             self._run_write(self._persist_commit, {**commit, "stateId": self.latest_state_id})
+
+    def _on_chart_event(self, change: dict) -> None:
+        """A chart settled in the Visualize tab: record it through the source (analysts only, once per event id)."""
+        event = change.get("new") or {}
+        record = getattr(self._source, "record_chart", None)
+        if not self.widget.capture_charts or self._mode != "analyst" or record is None:
+            return
+        event_id, artifact_id, name, settings = (event.get(k) for k in ("id", "artifactId", "artifactName", "settings"))
+        if not (isinstance(event_id, str) and isinstance(artifact_id, str) and isinstance(name, str) and isinstance(settings, dict)):
+            return
+        if event_id in self._handled_charts:
+            return
+        self._handled_charts.add(event_id)
+        self._run_write(self._record_chart, record, event_id, artifact_id, name, settings, _decode_png(event.get("image")))
+
+    def _record_chart(self, record, event_id: str, artifact_id: str, name: str, settings: dict, png: bytes | None) -> None:
+        recorded = record(artifact_id, name, settings, png)
+        if isinstance(recorded, dict):
+            self.widget.chart_ack = {"eventId": event_id, **recorded}
 
     def _on_mode_changed(self, change: dict) -> None:
         # The persona is fixed at construction; undo any frontend attempt to change it.

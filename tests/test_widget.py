@@ -566,3 +566,104 @@ def test_the_kernel_answers_the_players_ping_so_it_can_stop_saying_it_is_rebuild
     assert panel.widget.replay_pong == {"token": "1700000000000-1"}
     panel.widget.replay_ping = {"token": "1700000000000-2"}
     assert panel.widget.replay_pong == {"token": "1700000000000-2"}
+
+
+# --- charts built in marimo's Visualize tab -------------------------------------------------------------------------------------
+
+
+import base64
+
+_PNG = base64.b64encode(b"\x89PNG" + bytes([13, 10, 26, 10]) + b"tiny").decode("ascii")
+
+
+class _ChartSource(EmptyProvenanceSource):
+    """A source that records charts (optional, like persist_annotation)."""
+
+    def __init__(self):
+        self.charts: list[tuple[str, str, dict, bytes | None]] = []
+
+    def record_chart(self, artifact_id, artifact_name, settings, png=None):
+        self.charts.append((artifact_id, artifact_name, settings, png))
+        return {"stateId": "chart-state", "artifactId": "chart-state", "artifactName": "Bar chart of case_log"}
+
+
+def _chart_event(event_id="e1", image=None, **settings):
+    event = {"id": event_id, "artifactId": "s1", "artifactName": "case_log", "settings": {"chart_type": "Bar", "x": "c", **settings}}
+    if image is not None:
+        event["image"] = image
+    return event
+
+
+def test_capture_charts_is_off_by_default_and_ignores_chart_events():
+    source = _ChartSource()
+    panel = ProvenancePanel(source=source)
+    assert panel.widget.capture_charts is False
+    panel.widget.chart_event = _chart_event()
+    panel.wait_for_persistence()
+    assert source.charts == []
+
+
+def test_a_chart_event_is_recorded_through_the_source_with_its_picture():
+    source = _ChartSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    assert panel.widget.capture_charts is True
+    panel.widget.chart_event = _chart_event(image=_PNG)
+    panel.wait_for_persistence()
+    assert len(source.charts) == 1
+    artifact_id, name, settings, png = source.charts[0]
+    assert (artifact_id, name, settings) == ("s1", "case_log", {"chart_type": "Bar", "x": "c"})
+    assert png == base64.b64decode(_PNG)
+
+
+def test_the_page_is_told_which_artifact_the_chart_became():
+    panel = ProvenancePanel(source=_ChartSource(), capture_charts=True)
+    panel.widget.chart_event = _chart_event("e7", image=_PNG)
+    panel.wait_for_persistence()
+    assert panel.widget.chart_ack == {"eventId": "e7", "stateId": "chart-state", "artifactId": "chart-state", "artifactName": "Bar chart of case_log"}
+
+
+def test_a_chart_without_a_usable_picture_is_still_recorded_without_one():
+    source = _ChartSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    panel.widget.chart_event = _chart_event("a", image="not base64 !!")
+    panel.widget.chart_event = _chart_event("b", image=base64.b64encode(b"x" * 700_000).decode("ascii"))  # over the snapshot size limit
+    panel.wait_for_persistence()
+    assert [c[3] for c in source.charts] == [None, None]
+
+
+def test_the_same_chart_event_id_is_recorded_once():
+    source = _ChartSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    panel.widget.chart_event = _chart_event("same")
+    panel.widget.chart_event = {**_chart_event("same"), "settings": {"chart_type": "Bar", "x": "c"}}  # re-sent: same id
+    panel.widget.chart_event = _chart_event("other", y="count")
+    panel.wait_for_persistence()
+    assert [c[2].get("y") for c in source.charts] == [None, "count"]
+
+
+def test_a_reviewer_never_records_charts():
+    source = _ChartSource()
+    panel = ProvenancePanel(source=source, mode="reviewer", capture_charts=True)
+    panel.widget.chart_event = _chart_event()
+    panel.wait_for_persistence()
+    assert source.charts == []
+
+
+def test_malformed_chart_events_and_sources_without_record_chart_are_ignored():
+    source = _ChartSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    for bad in ({"id": "x"}, {"id": "y", "artifactId": "s1", "artifactName": "t", "settings": "not a dict"}, {}):
+        panel.widget.chart_event = bad
+    panel.wait_for_persistence()
+    assert source.charts == []
+    ProvenancePanel(source=EmptyProvenanceSource(), capture_charts=True).widget.chart_event = _chart_event()  # no error
+
+
+def test_capture_charts_switches_on_marimo_visualize(monkeypatch):
+    import provenance_widget.widget as widget_module
+
+    called = []
+    monkeypatch.setattr(widget_module, "enable_chart_builder", lambda: called.append(True) or True)
+    ProvenancePanel(source=_ChartSource(), capture_charts=True)
+    ProvenancePanel(source=_ChartSource())
+    assert called == [True]  # only the panel that asked for it
