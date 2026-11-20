@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.0
+
+### Added
+- **Charts built in marimo's Visualize tab are part of the history.** `ProvenancePanel(..., capture_charts=True)` does two things:
+  it shows marimo's **Visualize** button on tables also when the notebook runs as an app (marimo offers it only in edit mode), and it
+  records each chart the analyst builds there as a step (`visualize_chart`): the table it is about, chart type, X, Y, aggregation, sort,
+  color and facet, and a picture of the chart. The chart is then an output like any other: **Anchor** it and write an annotation, find
+  it as evidence in the **PDF** (the chart is drawn as a figure), and see it again in reviewer mode.
+  A chart is recorded once it has been left unchanged for about a second, and not again while it stays as it is.
+- `show_recorded_charts(source, state_id)` (and `recorded_charts`) for a reviewer notebook: the charts recorded up to the replay
+  cursor, drawn and tagged so that **Jump to anchor** can point at them.
+- `PmprovAdapter.record_chart(...)`, the optional source method the panel calls; `enable_chart_builder()` for notebooks that want
+  Visualize without a panel.
+
+### Notes
+- marimo draws the chart builder in the browser and tells the kernel nothing about it, so the panel watches the page and reads the
+  builder's form. If a marimo upgrade changes that page, charts are simply not recorded; nothing else is affected.
+
 ## 0.11.1
 
 ### Fixed
