@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **The Visualize charts come back when the analysis is resumed in another browser.** marimo keeps the chart builder of a table only
+  in the browser, so a new computer, a new port or cleared site data opened every table with an empty builder although the history
+  held each chart. `ProvenancePanel(..., capture_charts=True)` now also keeps marimo's own saved chart tabs of the table's cell with
+  each recorded chart, and on a resumed history (`fresh=False`) the page writes them back into marimo's storage and reloads once, so
+  the charts open in the live builder as the analyst left them. Nothing happens when the browser already has them; a tab it already
+  has is never overwritten; it never reloads twice for the same charts in one tab.
+- `PmprovAdapter.record_chart(..., builder=None)` and `PmprovAdapter.charts_to_restore()`; `ProvenanceWidget.chart_restore`.
+
+### Notes
+- Charts recorded by earlier versions have no builder state and are not restored (reviewers still see them).
+- The aggregation the form showed (marimo shows Y as "Mean" by default but saves none until it is chosen, and an entry without it
+  reloads as "None") is filled in from the page when the chart is recorded, so a restored chart plots what the analyst saw.
+- pmprov stores nested step parameters as text, so the builder state is kept as a JSON string.
+
 ## 0.12.0
 
 ### Added
