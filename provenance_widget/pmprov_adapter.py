@@ -69,6 +69,31 @@ def _map_category(name: str | None) -> StepCategory:
         return _DEFAULT_CATEGORY
 
 
+def _picture_of(png: bytes | None):
+    """A PIL image from PNG bytes, or None when there is none, it is not a PNG, or PIL is not installed."""
+    from provenance_widget.element_snapshot import _PNG_MAGIC
+
+    if not png or bytes(png[:8]) != _PNG_MAGIC:
+        return None
+    try:
+        import io
+
+        from PIL import Image
+
+        picture = Image.open(io.BytesIO(png))
+        picture.load()
+        return picture
+    except Exception:
+        return None
+
+
+def _chart_title(table_name: str, settings: dict) -> str:
+    """"Bar chart of case_log: case_LoanGoal by Count of records" for the artifact's name (what an anchor and the report call it)."""
+    kind = str(settings.get("chart_type") or "Chart")
+    columns = " by ".join(str(settings[k]) for k in ("x", "y") if settings.get(k))
+    return f"{kind} chart of {table_name}" + (f": {columns}" if columns else "")
+
+
 class PmprovAdapter:
     """Reads a pmprov RuntimeTracker's history as a ProvenanceTree.
 
@@ -96,6 +121,9 @@ class PmprovAdapter:
         self._tree_lock = threading.RLock()
         self._picked_lock = threading.Lock()
         self._tags_lock = threading.Lock()
+        # the settings last recorded for each table's chart, so a chart that has not changed is not recorded again
+        self._chart_lock = threading.Lock()
+        self._last_chart: dict[str, dict] = {}
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -301,6 +329,36 @@ class PmprovAdapter:
         if not candidates:
             return None
         return max(candidates, key=lambda s: s["timestamp"])["output_state_id"]
+
+    def record_chart(self, artifact_id: str, artifact_name: str, settings: dict, png: bytes | None = None) -> dict | None:
+        """Record a chart built in marimo's Visualize tab as a step of the history: which table it is about and its settings.
+
+        The settings are what the chart builder showed (chart type, X, Y, aggregation, sort, color...), never the plotted data. With a
+        PNG of the chart, the step's output is that picture (the variable `chart_image`), which makes the chart an artifact like any
+        other: it can be anchored, annotated, drawn in the PDF and shown again in reviewer mode.
+
+        A call with the settings already recorded for that table returns None and records nothing. Otherwise returns
+        {"stateId", "artifactId" (None without a usable picture), "artifactName"}.
+        """
+        settings = dict(settings)
+        with self._chart_lock:
+            if self._last_chart.get(artifact_id) == settings:
+                return None
+            self._last_chart[artifact_id] = settings
+        picture = _picture_of(png)
+        chart_name = _chart_title(artifact_name, settings)
+        self._rt.trace_step(
+            func=lambda table, settings: picture,  # the picture is not an argument: arguments are fingerprinted and stored as parameters
+            func_name="visualize_chart",
+            raw_line=f"chart_image = visualize_chart({artifact_name!r}, ...)" if picture is not None else "visualize_chart(...)",
+            args=[artifact_name, settings],
+            kwargs={},
+            targets=["chart_image"] if picture is not None else [],
+        )
+        state_id = self.latest_state_id("visualize_chart")
+        # an annotation targets the state that produced an output (see variable_for_artifact), so that is the chart's artifact id
+        artifact = state_id if picture is not None else None
+        return {"stateId": state_id, "artifactId": artifact, "artifactName": chart_name}
 
     def _load_annotations(self, state_id: str) -> list[Annotation]:
         """Translate pmprov's stored annotations/tags for *state_id* into this
