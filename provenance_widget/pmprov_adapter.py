@@ -23,6 +23,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+from provenance_widget.builder_state import valid_builder_state
 from provenance_widget.repeats import DEFAULT_MIN_LENGTH, find_repeated_runs
 from provenance_widget.interfaces import (
     Agent,
@@ -326,17 +327,23 @@ class PmprovAdapter:
             return None
         return max(candidates, key=lambda s: s["timestamp"])["output_state_id"]
 
-    def record_chart(self, artifact_id: str, artifact_name: str, settings: dict, png: bytes | None = None) -> dict | None:
+    def record_chart(
+        self, artifact_id: str, artifact_name: str, settings: dict, png: bytes | None = None, builder: dict | None = None
+    ) -> dict | None:
         """Record a chart built in marimo's Visualize tab as a step of the history: which table it is about and its settings.
 
         The settings are what the chart builder showed (chart type, X, Y, aggregation, sort, color...), never the plotted data. With a
         PNG of the chart, the step's output is those PNG bytes (the variable `chart_image`), which makes the chart an artifact like any
         other: it can be anchored, annotated, drawn in the PDF and shown again in reviewer mode.
 
+        `builder` is marimo's own saved state of the chart tabs of the table's cell (see `builder_state`). It is kept with the step, so
+        that `charts_to_restore` can give the tabs back to a browser that has never seen the analysis. A malformed one is ignored.
+
         A call with the settings already recorded for that table returns None and records nothing. Otherwise returns
         {"stateId", "artifactId" (None without a usable picture), "artifactName"}.
         """
         settings = dict(settings)
+        builder = valid_builder_state(builder)
         with self._chart_lock:
             if self._last_chart is None:
                 self._last_chart = self._charts_in_history()
@@ -346,10 +353,11 @@ class PmprovAdapter:
         picture = _picture_of(png)
         chart_name = _chart_title(artifact_name, settings)
         self._rt.trace_step(
-            func=lambda table, settings: picture,  # the picture is not an argument: arguments are fingerprinted and stored as parameters
+            func=lambda table, settings, builder=None: picture,  # the picture is not an argument: arguments are fingerprinted and stored
             func_name="visualize_chart",
             raw_line=f"chart_image = visualize_chart({artifact_name!r}, ...)" if picture is not None else "visualize_chart(...)",
-            args=[artifact_name, settings],
+            # pmprov flattens nested parameter values to text, so the builder state travels as a JSON string and is parsed on the way out
+            args=[artifact_name, settings] + ([json.dumps(builder, sort_keys=True)] if builder is not None else []),
             kwargs={},
             targets=["chart_image"] if picture is not None else [],
         )
@@ -357,6 +365,26 @@ class PmprovAdapter:
         # an annotation targets the state that produced an output (see variable_for_artifact), so that is the chart's artifact id
         artifact = state_id if picture is not None else None
         return {"stateId": state_id, "artifactId": artifact, "artifactName": chart_name}
+
+    def charts_to_restore(self) -> dict[str, list[dict]]:
+        """cell id -> the chart tabs marimo's builder had in that cell, from the latest chart recorded there (oldest first, so later
+        ones win). What the panel hands to the page, which puts them back into a browser that lacks them. Charts recorded without
+        a builder state (older histories) add nothing. Empty on any trouble reading the history."""
+        try:
+            restore: dict[str, list[dict]] = {}
+            for node in self.get_tree().nodes.values():
+                if node.operation.name != "visualize_chart":
+                    continue
+                try:
+                    raw = node.params.get("builder")
+                    builder = valid_builder_state(json.loads(raw) if isinstance(raw, str) else raw)
+                except ValueError:
+                    continue  # a step whose builder state is not readable adds nothing
+                if builder is not None:
+                    restore[builder["cellId"]] = builder["tabs"]
+            return restore
+        except Exception:
+            return {}
 
     def _charts_in_history(self) -> dict[str, dict]:
         """table name -> the settings of the latest chart recorded for it, from the stored steps (oldest first, so later ones win)."""
