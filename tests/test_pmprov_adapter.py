@@ -541,3 +541,75 @@ def test_a_step_that_returns_a_tuple_names_every_variable_it_bound(rt, event_log
     assert adapter.variable_for_artifact(state, state) is None  # two variables: which one is meant is not known
     assert sorted(adapter.variables_for_artifact(state, state)) == ["frame", "info"]
     assert adapter.variables_for_artifact(state, "no-such-state") == []
+
+
+# --- charts built in marimo's Visualize tab -------------------------------------------------------------------------------------
+
+
+CHART = {"chart_type": "Bar", "x": "case_LoanGoal", "y": "Count of records", "x_type": "Categorical", "sort": "Ascending"}
+
+
+def _png(width=40, height=20, color=(200, 30, 30)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _chart_nodes(adapter):
+    return [n for n in adapter.get_tree().nodes.values() if n.operation.name == "visualize_chart"]
+
+
+def test_record_chart_adds_a_step_with_the_settings_as_readable_params(rt, event_log):
+    rt.trace_step(func=lambda df: df.assign(x=1), func_name="f", raw_line="df=f(df)", args=[event_log], kwargs={}, targets=["df"])
+    adapter = PmprovAdapter(rt)
+
+    recorded = adapter.record_chart("state-of-the-table", "case_log", CHART)
+
+    nodes = _chart_nodes(adapter)
+    assert len(nodes) == 1 and nodes[0].state_id == recorded["stateId"]
+    shown = str(nodes[0].params)
+    for expected in ("case_log", "case_LoanGoal", "Count of records", "Bar"):
+        assert expected in shown
+    assert recorded["artifactId"] is None  # no picture was given, so there is nothing to anchor to
+
+
+def test_record_chart_with_a_picture_makes_it_an_artifact_that_can_be_anchored_and_restored(rt):
+    adapter = PmprovAdapter(rt)
+
+    recorded = adapter.record_chart("a", "case_log", CHART, png=_png(60, 30))
+
+    assert recorded["artifactName"].startswith("Bar chart of case_log")
+    artifact = recorded["artifactId"]
+    assert artifact == recorded["stateId"] and adapter.state_for_artifact(artifact) == recorded["stateId"]
+    assert adapter.variable_for_artifact(recorded["stateId"], artifact) == "chart_image"
+    picture = adapter.snapshot(recorded["stateId"], ["chart_image"])["chart_image"]
+    assert picture.size == (60, 30)
+    from provenance_widget.element_snapshot import _PNG_MAGIC, figure_png
+
+    assert figure_png(picture).startswith(_PNG_MAGIC)  # what the PDF export draws
+
+
+def test_record_chart_twice_with_the_same_settings_records_once(rt):
+    adapter = PmprovAdapter(rt)
+    first = adapter.record_chart("a", "case_log", CHART)
+    again = adapter.record_chart("a", "case_log", dict(CHART))
+    assert again is None and first is not None
+    assert len(_chart_nodes(adapter)) == 1
+
+
+def test_record_chart_with_changed_settings_or_another_table_records_again(rt):
+    adapter = PmprovAdapter(rt)
+    adapter.record_chart("a", "case_log", CHART)
+    adapter.record_chart("a", "case_log", {**CHART, "chart_type": "Line"})
+    adapter.record_chart("b", "raw_events", CHART)
+    assert len(_chart_nodes(adapter)) == 3
+
+
+def test_record_chart_ignores_a_picture_that_is_not_a_png(rt):
+    adapter = PmprovAdapter(rt)
+    recorded = adapter.record_chart("a", "case_log", CHART, png=b"not an image")
+    assert recorded["stateId"] and recorded["artifactId"] is None
