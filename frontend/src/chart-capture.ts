@@ -2,6 +2,7 @@
 // watches the page for a chart builder that has settled, reads its settings from the form, and hands them to the panel
 // (`chart_event`), which records them as a step. It reads headings, labels and roles (not styling classes), and does nothing, never
 // throws, when the page does not look the way it expects.
+import { readBuilderState, withDisplayedAggregation } from "./chart-restore";
 import { findTaggedAncestor } from "./picker";
 
 export type ChartSettings = Record<string, string | boolean>;
@@ -188,12 +189,16 @@ export function armChartCapture(model: AnyModel, panelRoot: HTMLElement, pollMs 
       const picture = chartPicture(shadow);
       if (picture) waiting.set(id, { host, png: picture.png });
       tagged.delete(host);
+      // marimo's own saved tabs for this table's cell: what restoreChartBuilders writes back in a browser that has never seen them
+      const saved = readBuilderState(host);
+      const builder = saved ? withDisplayedAggregation(saved, settings) : null;
       model.set("chart_event", {
         id,
         artifactId: tag.dataset.pwArtifactId ?? "",
         artifactName: tag.dataset.pwArtifactName ?? "",
         settings,
         ...(picture ? { image: picture.png } : {}),
+        ...(builder ? { builder } : {}),
       });
       model.save_changes();
     }
