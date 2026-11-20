@@ -24,7 +24,7 @@ export function readSnapshot(element: HTMLElement): unknown {
   }
 }
 
-function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
+export function findTaggedAncestor(el: EventTarget | null): HTMLElement | null {
   let node = el as HTMLElement | null;
   while (node) {
     if (node.dataset && node.dataset.pwArtifactId) return node;

@@ -8,6 +8,7 @@ import { armGutterAffordance } from "./gutter";
 import { icon } from "./components/icons";
 import { sendAgainWhenBackOnline } from "./reconnect";
 import { armSidebarResize } from "./sidebar-resize";
+import { armChartCapture } from "./chart-capture";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -243,6 +244,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
     handleExportResult(model);
     renderBody();
   });
+
+  // Charts built in marimo's Visualize tab are recorded when the panel was made with capture_charts (the page is watched only then).
+  const mount = el as HTMLElement & { _pwStopCharts?: () => void };
+  mount._pwStopCharts?.();
+  mount._pwStopCharts = armChartCapture(model, root);
 
   armGutterAffordance(model, (selection) => {
     if (model.get("active_tab") !== "curated" && getVisibleTabs().includes("curated")) {
