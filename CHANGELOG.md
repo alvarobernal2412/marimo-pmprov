@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
 ### Added
 - **The Visualize charts come back when the analysis is resumed in another browser.** marimo keeps the chart builder of a table only
