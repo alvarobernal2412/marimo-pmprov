@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+import inspect
 import logging
 import pathlib
 import re
@@ -11,6 +12,7 @@ import warnings
 import anywidget
 import traitlets
 
+from provenance_widget.builder_state import valid_builder_state
 from provenance_widget.element_snapshot import SNAPSHOT_IMAGE_MAX_BYTES
 from provenance_widget.interfaces import EmptyProvenanceSource, ProvenanceSource
 from provenance_widget.serialize import tree_to_json
@@ -69,6 +71,18 @@ class ProvenanceWidget(anywidget.AnyWidget):
     # the panel's answer to a chart_event once it is recorded: {"eventId", "stateId", "artifactId", "artifactName"}, so the page can
     # mark the chart as the artifact it became (and the analyst can anchor an annotation to it)
     chart_ack = traitlets.Dict({}).tag(sync=True)
+    # The charts the history recorded, as marimo keeps them in the browser: {cell id: [{"tabName", "chartType", "config"}]}. The page
+    # puts them back into a browser that lacks them (marimo saves chart tabs only there), reloading once. Analysts with capture_charts.
+    chart_restore = traitlets.Dict({}).tag(sync=True)
+
+
+def _takes_builder(record) -> bool:
+    """Whether a source's record_chart accepts marimo's builder state (sources written for 0.12 have no such parameter)."""
+    try:
+        parameters = inspect.signature(record).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "builder" or p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
 
 
 def _decode_png(encoded) -> bytes | None:
@@ -97,7 +111,9 @@ class ProvenancePanel:
     `empty_hint` replaces the line the analyst's list shows while there is no annotation yet, for a course that wants to
     say how to write one.
     `capture_charts=True` shows marimo's Visualize button on tables (also in `marimo run`) and records each chart the analyst builds
-    there as a step, through the source's optional `record_chart(artifact_id, artifact_name, settings)`.
+    there as a step, through the source's optional `record_chart(artifact_id, artifact_name, settings)`. With a source that also has
+    `charts_to_restore()`, a resumed history gives those charts back in a browser that lacks them (marimo keeps the chart builder only
+    in the browser): the page restores them and reloads once.
     """
 
     def __init__(
@@ -144,6 +160,8 @@ class ProvenancePanel:
         if capture_charts:
             enable_chart_builder()
         self._handled_charts: set[str] = set()
+        if capture_charts and mode == "analyst":
+            self._hand_charts_to_restore_to_the_page(background=build_in_background)
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0
         # commits made while no analysis state was recorded yet (see _persist_commit)
@@ -330,12 +348,38 @@ class ProvenancePanel:
         if event_id in self._handled_charts:
             return
         self._handled_charts.add(event_id)
-        self._run_write(self._record_chart, record, event_id, artifact_id, name, settings, _decode_png(event.get("image")))
+        builder = valid_builder_state(event.get("builder"))
+        self._run_write(self._record_chart, record, event_id, artifact_id, name, settings, _decode_png(event.get("image")), builder)
 
-    def _record_chart(self, record, event_id: str, artifact_id: str, name: str, settings: dict, png: bytes | None) -> None:
-        recorded = record(artifact_id, name, settings, png)
+    def _record_chart(
+        self, record, event_id: str, artifact_id: str, name: str, settings: dict, png: bytes | None, builder: dict | None = None
+    ) -> None:
+        # marimo's builder state goes only to a source that takes it: an older record_chart(artifact_id, name, settings, png) still works
+        extra = {"builder": builder} if builder is not None and _takes_builder(record) else {}
+        recorded = record(artifact_id, name, settings, png, **extra)
         if isinstance(recorded, dict):
             self.widget.chart_ack = {"eventId": event_id, **recorded}
+
+    def _hand_charts_to_restore_to_the_page(self, background: bool) -> None:
+        """Give the page the charts the history recorded, so it can put them back into a browser that lacks them. Read off the
+        history in a thread when that history is a live one, whose first read can take a while and must not hold up the notebook."""
+        fetch = getattr(self._source, "charts_to_restore", None)
+        if not callable(fetch):
+            return
+
+        def hand_over() -> None:
+            try:
+                restore = fetch()
+            except Exception:
+                _log.exception("could not read the recorded charts to restore")
+                return
+            if isinstance(restore, dict) and restore:
+                self.widget.chart_restore = restore
+
+        if background:
+            threading.Thread(target=hand_over, name="pw-charts-restore", daemon=True).start()
+        else:
+            hand_over()
 
     def _on_mode_changed(self, change: dict) -> None:
         # The persona is fixed at construction; undo any frontend attempt to change it.

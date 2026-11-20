@@ -649,6 +649,70 @@ def test_a_reviewer_never_records_charts():
     assert source.charts == []
 
 
+# --- restoring the chart builder after a restart ----------------------------------------------------------------------------------
+
+BUILDER = {"cellId": "MJUe", "tabs": [{"tabName": "Bar Chart", "chartType": "bar", "config": {"general": {}}}]}
+
+
+class _BuilderSource(_ChartSource):
+    """A source that also keeps marimo's builder state and hands it back to restore (what PmprovAdapter does)."""
+
+    def __init__(self, restore=None):
+        super().__init__()
+        self.builders = []
+        self._restore = restore or {}
+
+    def record_chart(self, artifact_id, artifact_name, settings, png=None, builder=None):
+        self.builders.append(builder)
+        return super().record_chart(artifact_id, artifact_name, settings, png)
+
+    def charts_to_restore(self):
+        return self._restore
+
+
+def test_a_chart_event_hands_marimos_builder_state_to_a_source_that_takes_it():
+    source = _BuilderSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    panel.widget.chart_event = {**_chart_event(), "builder": BUILDER}
+    panel.wait_for_persistence()
+    assert source.builders == [BUILDER]
+
+
+def test_a_chart_event_still_records_for_a_source_that_does_not_take_the_builder_state():
+    source = _ChartSource()  # the older record_chart signature
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    panel.widget.chart_event = {**_chart_event(), "builder": BUILDER}
+    panel.wait_for_persistence()
+    assert len(source.charts) == 1
+
+
+def test_a_malformed_builder_state_is_dropped_but_the_chart_is_recorded():
+    source = _BuilderSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    panel.widget.chart_event = {**_chart_event("a"), "builder": {"cellId": 5}}
+    panel.widget.chart_event = {**_chart_event("b", y="count"), "builder": "nope"}
+    panel.wait_for_persistence()
+    assert source.builders == [None, None] and len(source.charts) == 2
+
+
+def test_the_stored_builder_states_are_handed_to_the_page_to_restore():
+    stored = {"MJUe": BUILDER["tabs"]}
+    panel = ProvenancePanel(source=_BuilderSource(stored), capture_charts=True)
+    assert panel.widget.chart_restore == stored
+
+
+def test_nothing_is_restored_without_capture_for_a_reviewer_or_from_a_failing_source():
+    stored = {"MJUe": BUILDER["tabs"]}
+    assert ProvenancePanel(source=_BuilderSource(stored)).widget.chart_restore == {}
+    assert ProvenancePanel(source=_BuilderSource(stored), mode="reviewer", capture_charts=True).widget.chart_restore == {}
+
+    class Failing(_BuilderSource):
+        def charts_to_restore(self):
+            raise RuntimeError("storage unavailable")
+
+    assert ProvenancePanel(source=Failing(), capture_charts=True).widget.chart_restore == {}
+
+
 def test_malformed_chart_events_and_sources_without_record_chart_are_ignored():
     source = _ChartSource()
     panel = ProvenancePanel(source=source, capture_charts=True)
