@@ -165,6 +165,29 @@ bar_chart
 See `examples/demo_notebook.py` for all five wired up against the same
 dataset.
 
+## Charts built in marimo's Visualize tab
+
+marimo draws the chart builder behind a table's **Visualize** button in the browser and keeps it there, and it offers the button only
+in edit mode. `ProvenancePanel(..., capture_charts=True)` shows it in an app too and records what the analyst builds:
+
+```python
+panel = ProvenancePanel(source=PmprovAdapter(rt), mode="analyst", capture_charts=True)
+```
+
+Tables made with `show_table` (or any table inside one) are covered. Once a chart has been left alone for about a second it becomes a
+step `visualize_chart` of the history (the table, chart type, X, Y, aggregation, sort, color, facet and a picture of the chart). It can
+then be anchored like a table or a map, it is drawn in the PDF, and a reviewer notebook can show the charts up to the replay cursor:
+
+```python
+from provenance_widget.display import show_recorded_charts
+
+show_recorded_charts(adapter, cursor_state)  # the charts recorded up to the step the reviewer is on
+```
+
+A source opts in by having `record_chart(artifact_id, artifact_name, settings, png=None)`; `PmprovAdapter` has it. The watcher reads
+the headings and labels of marimo's chart builder, so a marimo upgrade that changes it stops charts from being recorded (nothing else
+breaks): re-check after upgrading marimo.
+
 ## Export the annotations as a PDF
 
 In analyst mode the Annotations list has an **Export PDF** button. It saves a
