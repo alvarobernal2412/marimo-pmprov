@@ -580,17 +580,15 @@ def test_record_chart_adds_a_step_with_the_settings_as_readable_params(rt, event
 def test_record_chart_with_a_picture_makes_it_an_artifact_that_can_be_anchored_and_restored(rt):
     adapter = PmprovAdapter(rt)
 
-    recorded = adapter.record_chart("a", "case_log", CHART, png=_png(60, 30))
+    sent = _png(60, 30)
+    recorded = adapter.record_chart("a", "case_log", CHART, png=sent)
 
     assert recorded["artifactName"].startswith("Bar chart of case_log")
     artifact = recorded["artifactId"]
     assert artifact == recorded["stateId"] and adapter.state_for_artifact(artifact) == recorded["stateId"]
     assert adapter.variable_for_artifact(recorded["stateId"], artifact) == "chart_image"
     picture = adapter.snapshot(recorded["stateId"], ["chart_image"])["chart_image"]
-    assert picture.size == (60, 30)
-    from provenance_widget.element_snapshot import _PNG_MAGIC, figure_png
-
-    assert figure_png(picture).startswith(_PNG_MAGIC)  # what the PDF export draws
+    assert picture == sent  # the PNG itself, which the PDF export draws as it is
 
 
 def test_record_chart_twice_with_the_same_settings_records_once(rt):
@@ -613,3 +611,40 @@ def test_record_chart_ignores_a_picture_that_is_not_a_png(rt):
     adapter = PmprovAdapter(rt)
     recorded = adapter.record_chart("a", "case_log", CHART, png=b"not an image")
     assert recorded["stateId"] and recorded["artifactId"] is None
+
+
+def test_a_chart_sized_picture_stays_small_enough_to_travel_in_the_sync_zip(rt, tmp_path):
+    import io
+
+    from PIL import Image, ImageDraw
+
+    from provenance_widget.portable import DEFAULT_MAX_ARTIFACT_BYTES
+
+    drawing = Image.new("RGB", (900, 620), "white")
+    ImageDraw.Draw(drawing).rectangle([60, 80, 260, 580], fill=(76, 120, 168))
+    buffer = io.BytesIO()
+    drawing.save(buffer, format="PNG")
+    adapter = PmprovAdapter(rt)
+
+    adapter.record_chart("a", "case_log", CHART, png=buffer.getvalue())
+    adapter.settle()
+
+    sizes = [p.stat().st_size for p in (rt.storage.artifact_dir).glob("*")] if hasattr(rt.storage, "artifact_dir") else []
+    assert sizes and max(sizes) < DEFAULT_MAX_ARTIFACT_BYTES  # a decoded image here was 1.6 MB and was left out of the zip
+
+
+def test_a_chart_already_in_the_history_is_not_recorded_again_after_a_restart(rt):
+    first_session = PmprovAdapter(rt)
+    first_session.record_chart("a", "case_log", CHART, png=_png())
+
+    resumed = PmprovAdapter(rt)  # a new process over the same stored history: it has no memory of its own
+    assert resumed.record_chart("a", "case_log", dict(CHART), png=_png()) is None
+    assert resumed.record_chart("a", "case_log", {**CHART, "chart_type": "Line"}) is not None
+    assert len(_chart_nodes(resumed)) == 2
+
+
+def test_the_same_chart_on_two_tables_is_two_steps(rt):
+    adapter = PmprovAdapter(rt)
+    adapter.record_chart("a", "case_log", CHART)
+    adapter.record_chart("b", "raw_events", CHART)
+    assert len(_chart_nodes(adapter)) == 2
