@@ -648,3 +648,50 @@ def test_the_same_chart_on_two_tables_is_two_steps(rt):
     adapter.record_chart("a", "case_log", CHART)
     adapter.record_chart("b", "raw_events", CHART)
     assert len(_chart_nodes(adapter)) == 2
+
+
+# --- restoring the chart builder after a restart ----------------------------------------------------------------------------------
+
+
+def _builder(cell, chart_type="bar", x="activity"):
+    """What marimo keeps in the browser for one cell: its chart tabs (tab name, chart type, the builder's own config)."""
+    tab = {"tabName": f"{chart_type.title()} Chart", "chartType": chart_type, "config": {"general": {"xColumn": {"field": x}}}}
+    return {"cellId": cell, "tabs": [tab]}
+
+
+def test_charts_to_restore_returns_the_latest_builder_state_of_each_cell(rt):
+    adapter = PmprovAdapter(rt)
+    adapter.record_chart("a", "case_log", CHART, builder=_builder("MJUe"))
+    adapter.record_chart("a", "case_log", {**CHART, "chart_type": "Line"}, builder=_builder("MJUe", "line"))
+    adapter.record_chart("b", "raw_events", CHART, builder=_builder("Hbol", "bar", "cost"))
+    assert adapter.charts_to_restore() == {"MJUe": _builder("MJUe", "line")["tabs"], "Hbol": _builder("Hbol", "bar", "cost")["tabs"]}
+
+
+def test_charts_to_restore_survives_a_restart(rt):
+    PmprovAdapter(rt).record_chart("a", "case_log", CHART, png=_png(), builder=_builder("MJUe"))
+    resumed = PmprovAdapter(rt)  # a new process over the same stored history
+    assert resumed.charts_to_restore() == {"MJUe": _builder("MJUe")["tabs"]}
+
+
+def test_a_realistic_sized_builder_state_comes_back_whole(rt):
+    # marimo's real config nests several levels and lists tooltip fields: nothing may be flattened or cut on the way through the history
+    config = {"general": {"facet": {"row": {"linkYAxis": True, "binned": True, "maxbins": 6}}, "xColumn": {"field": "case_LoanGoal", "type": "string"}},
+              "color": {"field": "none", "scheme": "default"}, "tooltips": {"auto": False, "fields": [{"field": f"column_{i}", "type": "string"} for i in range(60)]}}
+    builder = {"cellId": "MJUe", "tabs": [{"tabName": "Bar Chart", "chartType": "bar", "config": config}]}
+    PmprovAdapter(rt).record_chart("a", "case_log", CHART, builder=builder)
+    assert PmprovAdapter(rt).charts_to_restore() == {"MJUe": builder["tabs"]}
+
+
+def test_charts_recorded_without_a_builder_state_restore_nothing(rt):
+    # histories made before the builder state was kept, and sources that did not read it
+    adapter = PmprovAdapter(rt)
+    adapter.record_chart("a", "case_log", CHART)
+    assert adapter.charts_to_restore() == {}
+
+
+def test_a_malformed_builder_state_is_not_stored_but_the_chart_is_still_recorded(rt):
+    adapter = PmprovAdapter(rt)
+    adapter.record_chart("a", "case_log", CHART, builder={"cellId": 5, "tabs": "no"})
+    adapter.record_chart("b", "raw_events", CHART, builder={"cellId": "X", "tabs": [{"tabName": "t"}]})  # a tab without type or config
+    assert adapter.charts_to_restore() == {}
+    assert len(_chart_nodes(adapter)) == 2
