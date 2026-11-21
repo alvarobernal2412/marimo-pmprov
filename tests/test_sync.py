@@ -413,3 +413,36 @@ def test_a_notebook_opened_offline_keeps_its_work_and_sends_it_later(service, tm
     sync.url = service.url
     assert sync.push() is True
     assert zipfile.ZipFile(io.BytesIO(service.stored[KEY][1])).read("provenance.db") == b"work done before the connection dropped"
+
+
+def test_a_notebook_opened_offline_with_no_copy_never_replaces_what_the_server_has(service, tmp_path):
+    earlier = Sync(service.url, KEY, _history(tmp_path / "other computer" / "provenance", b"weeks of work"))
+    assert earlier.push() is True
+    folder = tmp_path / "provenance"
+    sync = Sync("http://127.0.0.1:9", KEY, folder, timeout=1)
+    assert sync.restore() == "failed"  # the server could not be reached, and this computer has no copy
+    _history(folder, b"started again from nothing")
+
+    sync.url = service.url  # the connection is back
+    assert sync.push() is False
+
+    assert zipfile.ZipFile(io.BytesIO(service.stored[KEY][1])).read("provenance.db") == b"weeks of work"
+    assert sync.status.state == "conflict" and "reload" in sync.status.message.lower()
+
+
+def test_after_such_a_conflict_nothing_more_is_sent_and_a_reload_brings_the_saved_work_back(service, tmp_path):
+    Sync(service.url, KEY, _history(tmp_path / "other computer" / "provenance", b"weeks of work")).push()
+    folder = _history(tmp_path / "provenance", b"started again from nothing")
+    sync = Sync(service.url, KEY, folder)
+    assert sync.push() is False and sync.status.state == "conflict"
+    service.force_status = 500  # any further request would now show as "offline"
+    (folder / "provenance.db").write_bytes(b"more offline work")
+    assert sync.push() is False and sync.status.state == "conflict"
+    service.force_status = None
+
+    assert Sync(service.url, KEY, folder).restore() == "restored"  # what a reload of the notebook does
+
+    assert (folder / "provenance.db").read_bytes() == b"weeks of work"
+    aside = [p for p in tmp_path.iterdir() if p.name.startswith("provenance.unsynced-")]
+    assert len(aside) == 1 and (aside[0] / "provenance.db").read_bytes() == b"more offline work"
+
