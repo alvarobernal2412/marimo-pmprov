@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import threading
 from typing import Any
 
 SNAPSHOT_ROWS = 20
@@ -55,6 +56,36 @@ def _fetch_browser() -> bool:
         return False
 
 
+DRAW_TIMEOUT = 30.0  # seconds a Plotly figure may take to draw; a healthy machine needs a few
+_drawing_stuck = False
+
+
+def _plotly_png(obj: Any, scale: float) -> bytes:
+    """`obj.to_image`, given up on after DRAW_TIMEOUT. The browser kaleido draws with can fail to answer, and a notebook must not
+    wait on it for ever. Once that happened, later figures are not tried: each would wait just as long."""
+    global _drawing_stuck
+    problem = "Drawing the figure took too long: the browser that draws it did not answer."
+    if _drawing_stuck:
+        raise TimeoutError(problem)
+    done: dict = {}
+
+    def work() -> None:
+        try:
+            done["png"] = obj.to_image(format="png", scale=scale)  # needs the kaleido package, and Chrome
+        except BaseException as error:
+            done["error"] = error
+
+    worker = threading.Thread(target=work, name="pmprov-draw", daemon=True)
+    worker.start()
+    worker.join(DRAW_TIMEOUT)
+    if worker.is_alive():
+        _drawing_stuck = True
+        raise TimeoutError(problem)
+    if "error" in done:
+        raise done["error"]
+    return done["png"]
+
+
 def figure_png(obj: Any, dpi: int = 200, scale: float = 2, install_browser: bool = False) -> bytes | None:
     """PNG bytes for a matplotlib, Altair, Plotly or PIL figure, else None (`last_problem` says why, when it is known).
 
@@ -74,10 +105,10 @@ def figure_png(obj: Any, dpi: int = 200, scale: float = 2, install_browser: bool
             return vl_convert.vegalite_to_png(obj.to_dict(), scale=scale)
         if module.startswith("plotly"):
             try:
-                return obj.to_image(format="png", scale=scale)  # needs the kaleido package, and Chrome
+                return _plotly_png(obj, scale)
             except RuntimeError as problem:
                 if install_browser and "Chrome" in str(problem) and _fetch_browser():
-                    return obj.to_image(format="png", scale=scale)
+                    return _plotly_png(obj, scale)
                 raise
         if module.startswith("PIL"):
             buffer = io.BytesIO()
