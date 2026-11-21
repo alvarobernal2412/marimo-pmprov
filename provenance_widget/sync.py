@@ -66,6 +66,11 @@ def _storage_quiet(timeout: float = 30.0):
             _connect_lock.release()
 
 
+# The saver running for each folder, so that a notebook cell that runs again does not leave two of them saving the same work.
+_running: dict[str, "Sync"] = {}
+_running_lock = threading.Lock()
+
+
 class _Failure(Exception):
     def __init__(self, state: str) -> None:
         self.state = state
@@ -286,6 +291,11 @@ class Sync:
         """Save changes in the background, a few seconds after the last one."""
         if self._thread is not None and self._thread.is_alive():
             return
+        with _running_lock:
+            earlier = _running.get(str(self.folder.resolve()))
+            _running[str(self.folder.resolve())] = self
+        if earlier is not None and earlier is not self:
+            earlier._stop.set()  # it ends at its next pass; this one saves whatever it had not
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="pmprov-sync", daemon=True)
         self._thread.start()
