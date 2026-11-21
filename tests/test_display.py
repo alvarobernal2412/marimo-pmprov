@@ -97,3 +97,37 @@ def test_show_chart_with_a_figure_carries_an_image_snapshot():
     figure.subplots().plot([1, 2])
     wrapped = show_chart(mo.Html("<div>c</div>"), artifact_id="s1", artifact_name="c", figure=figure)
     assert "&quot;kind&quot;: &quot;image&quot;" in wrapped.text
+
+
+class _SlowFigure:
+    """Stands for a Plotly figure whose drawing never finishes (the browser that draws it does not answer)."""
+
+    __module__ = "plotly.graph_objs"
+    calls = 0
+
+    def to_image(self, **_):
+        import time
+
+        type(self).calls += 1
+        time.sleep(30)
+
+
+_SlowFigure.__module__ = "plotly.graph_objs"
+
+
+def test_a_figure_whose_drawing_never_finishes_is_given_up_on_and_later_ones_are_not_tried(monkeypatch):
+    import time
+
+    from provenance_widget import element_snapshot
+
+    monkeypatch.setattr(element_snapshot, "DRAW_TIMEOUT", 0.3)
+    monkeypatch.setattr(element_snapshot, "_drawing_stuck", False)
+    _SlowFigure.calls = 0
+    started = time.monotonic()
+
+    assert element_snapshot.figure_png(_SlowFigure()) is None
+    assert "too long" in element_snapshot.last_problem
+    assert element_snapshot.figure_png(_SlowFigure()) is None  # the next one does not wait again
+
+    assert time.monotonic() - started < 5 and _SlowFigure.calls == 1
+
