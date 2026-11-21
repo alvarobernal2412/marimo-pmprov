@@ -26,7 +26,7 @@ from .portable import unpack_provenance, zip_provenance
 
 @dataclass
 class SyncStatus:
-    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | closed | busy
+    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | closed | busy | conflict
     message: str = "Not saved to the course server yet."
     revision: int = 0
     saved_at: str | None = None
@@ -39,6 +39,8 @@ _MESSAGES = {
     "offline": "The course server could not be reached. Your work is kept in this notebook and will be saved when it is back.",
     "unauthorized": "The key was not accepted. Check that you pasted it completely, or ask your instructor.",
     "too-large": "Your work is too large for the course server. Tell your instructor.",
+    "conflict": "The course server already has work saved with your key, and it could not be loaded when this notebook opened. "
+    "Reload this page to load it. What you did since opening this page is kept in a separate folder on this computer.",
     "closed": "This course is closed, so your work is no longer saved. What you saved before is kept.",
 }
 
@@ -90,6 +92,7 @@ class Sync:
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._conflict = False  # the server has work this folder was not built on: nothing is sent until a restore settles it
 
     # --- what this folder was last known to match -----------------------------------------------------------------
     @property
@@ -156,6 +159,7 @@ class Sync:
         "failed" (see `status`). Run it before anything opens the provenance database.
         """
         with self._lock:
+            self._conflict = False
             try:
                 code, data, headers = self._request("GET")
             except _Failure as problem:
@@ -211,7 +215,7 @@ class Sync:
     def push(self) -> bool:
         """Send the folder if it changed since the last save. True when something was stored."""
         with self._lock:
-            if not self._has_history():
+            if not self._has_history() or self._conflict:
                 return False
             state = self._read_state()
             try:
@@ -222,10 +226,16 @@ class Sync:
             owned = state.get("key_hash") == self._key_hash
             if owned and state.get("sha256") == local_hash:
                 return False
+            # Without a record of what the server holds (it could not be reached when the notebook opened), 0 says "only if
+            # nothing is stored yet": saved work is never replaced by a folder that was not built on it.
             known = state.get("revision") if owned else None
             note = ""
             try:
-                code, body, _ = self._request("PUT", data, if_match=known)
+                code, body, _ = self._request("PUT", data, if_match=known or 0)
+                if code == 409 and known is None:
+                    self._conflict = True
+                    self._fail("conflict")
+                    return False
                 if code == 409:
                     # another tab or device saved in between: the latest save wins, and the student is told
                     current = json.loads(body or b"{}").get("revision")
