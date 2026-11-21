@@ -14,8 +14,29 @@ interface PickedSelection {
   snapshot?: unknown;
 }
 
-export function readSnapshot(element: HTMLElement): unknown {
-  const raw = element.dataset.pwSnapshot;
+// The first element that matches, also inside shadow roots (marimo draws some outputs, such as the contents of tabs, in one).
+function findDeep(root: ParentNode, selector: string): HTMLElement | null {
+  const hit = root.querySelector<HTMLElement>(selector);
+  if (hit) return hit;
+  for (const element of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
+    const inner = element.shadowRoot ? findDeep(element.shadowRoot, selector) : null;
+    if (inner) return inner;
+  }
+  return null;
+}
+
+// What an element shows, for the report: its own snapshot, or the one made for it afterwards (`chart_snapshot` in display.py puts
+// a chart's picture in a hidden element of its own, so that the chart does not wait for it).
+export function readSnapshot(element: HTMLElement, page: ParentNode = document): unknown {
+  let raw = element.dataset.pwSnapshot;
+  const id = element.dataset.pwArtifactId;
+  if (!raw && id) {
+    try {
+      raw = findDeep(page, `[data-pw-snapshot-for="${id.replace(/["\\]/g, "\\$&")}"]`)?.dataset.pwSnapshot;
+    } catch {
+      raw = undefined;
+    }
+  }
   if (!raw) return null;
   try {
     return JSON.parse(raw);

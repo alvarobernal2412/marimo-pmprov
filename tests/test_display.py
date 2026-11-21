@@ -131,3 +131,20 @@ def test_a_figure_whose_drawing_never_finishes_is_given_up_on_and_later_ones_are
 
     assert time.monotonic() - started < 5 and _SlowFigure.calls == 1
 
+
+def test_chart_snapshot_is_a_hidden_element_that_names_the_chart_it_pictures():
+    import html as htmllib
+    import json
+
+    from matplotlib.figure import Figure
+
+    from provenance_widget.display import chart_snapshot
+
+    figure = Figure()
+    figure.subplots().plot([1, 2])
+    text = chart_snapshot(figure, artifact_id="s1").text
+    assert 'data-pw-snapshot-for="s1"' in text and " hidden" in text
+    raw = text.split('data-pw-snapshot="', 1)[1].split('"', 1)[0]
+    assert json.loads(htmllib.unescape(raw))["kind"] == "image"
+
+    assert "data-pw-snapshot" not in chart_snapshot(object(), artifact_id="s1").text  # nothing to picture: nothing to find
