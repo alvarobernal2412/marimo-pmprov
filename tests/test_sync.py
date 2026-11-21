@@ -446,3 +446,23 @@ def test_after_such_a_conflict_nothing_more_is_sent_and_a_reload_brings_the_save
     aside = [p for p in tmp_path.iterdir() if p.name.startswith("provenance.unsynced-")]
     assert len(aside) == 1 and (aside[0] / "provenance.db").read_bytes() == b"more offline work"
 
+
+def test_starting_a_saver_stops_the_one_started_earlier_for_the_same_folder(service, tmp_path):
+    folder = _history(tmp_path / "provenance")
+    first = Sync(service.url, KEY, folder, debounce=0.2, poll=0.1)
+    second = Sync(service.url, KEY, folder, debounce=0.2, poll=0.1)
+    first.start()
+    try:
+        second.start()  # the notebook's cell ran again
+        assert _wait_for(lambda: not first._thread.is_alive())
+        (folder / "provenance.db").write_bytes(b"a change")
+        assert _wait_for(lambda: KEY in service.stored and service.stored[KEY][0] >= 1)
+        time.sleep(1)
+        saved_once = service.stored[KEY][0]
+        (folder / "provenance.db").write_bytes(b"another change")
+        assert _wait_for(lambda: service.stored[KEY][0] > saved_once)
+        time.sleep(1)
+        assert service.stored[KEY][0] == saved_once + 1  # one saver, so one save for one change
+    finally:
+        first.stop(flush=False)
+        second.stop(flush=False)
