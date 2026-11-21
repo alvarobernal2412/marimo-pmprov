@@ -40,6 +40,21 @@ def show_chart(chart_html: mo.Html, artifact_id: str, artifact_name: str, figure
     )
 
 
+def chart_snapshot(figure, artifact_id: str) -> mo.Html:
+    """The picture of a chart for the report, as a hidden element of its own.
+
+    Drawing a Plotly figure takes seconds. To let the chart appear at once, show it with `show_chart(...)` without `figure`, and
+    put this in a later cell: picking the chart finds its picture by `artifact_id`. Empty when the figure cannot be drawn.
+    """
+    snapshot = snapshot_of(figure) if figure is not None else None
+    if not snapshot:
+        return mo.Html("")
+    return mo.Html(
+        f'<span hidden data-pw-snapshot-for="{html.escape(artifact_id, quote=True)}" '
+        f'data-pw-snapshot="{html.escape(json.dumps(snapshot), quote=True)}"></span>'
+    )
+
+
 def show(
     element, artifact_id: str, artifact_name: str, value=None, granularity: str = "dataset"
 ) -> mo.Html:
