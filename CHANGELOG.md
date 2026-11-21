@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.14.0
+
+### Fixed
+- **Saved work is never replaced by a notebook that could not load it.** When the course server could not be reached as a notebook
+  opened and the computer had no copy, the notebook started empty and, once the server was back, `Sync` stored that empty history
+  over the saved one. A folder with no record of what the server holds is now sent only if the server has nothing. Otherwise
+  nothing is sent, `status.state` is `"conflict"` and the message asks for a reload; the reload loads the saved work and keeps what
+  was done meanwhile in a folder beside it (`<folder>.unsynced-<time>`).
+- **One saver per folder.** `Sync.start()` stops a saver started earlier for the same folder (a notebook cell that ran again left
+  two, and each change was then stored twice).
+- **A figure whose drawing never finishes no longer blocks the notebook.** Drawing a Plotly figure as an image is given up on after
+  `element_snapshot.DRAW_TIMEOUT` (30 s), and later figures are then not tried.
+
+### Added
+- `chart_snapshot(figure, artifact_id)` (in `provenance_widget.display`): the picture of a chart as a hidden element of its own.
+  Show the chart with `show_chart(...)` without `figure` so it appears at once, and put `chart_snapshot` in a later cell; picking
+  the chart finds its picture.
+
 ## 0.13.0
 
 ### Added
