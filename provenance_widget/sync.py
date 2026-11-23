@@ -43,6 +43,8 @@ _MESSAGES = {
     "Reload this page to load it. What you did since opening this page is kept in a separate folder on this computer.",
     "removed": "Your saved work was removed from the course server. This notebook starts empty; "
     "the earlier copy on this computer was set aside.",
+    "removed-in-use": "Your saved work was removed from the course server. Reload this page to start empty; "
+    "the earlier copy on this computer will be set aside.",
     "closed": "This course is closed, so your work is no longer saved. What you saved before is kept.",
 }
 
@@ -73,6 +75,20 @@ _running: dict[str, "Sync"] = {}
 _running_lock = threading.Lock()
 
 
+def _as_revision(value) -> int:
+    try:
+        return max(int(str(value).strip().strip('"')), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _revision_in(body: bytes) -> int:
+    try:
+        return _as_revision(json.loads(body or b"{}").get("revision"))
+    except (ValueError, AttributeError):
+        return 0
+
+
 class _Failure(Exception):
     def __init__(self, state: str) -> None:
         self.state = state
@@ -99,6 +115,7 @@ class Sync:
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._removed = False  # the server's copy was removed and this folder could not be moved yet: nothing is sent
         self._conflict = False  # the server has work this folder was not built on: nothing is sent until a restore settles it
 
     # --- what this folder was last known to match -----------------------------------------------------------------
@@ -116,11 +133,12 @@ class Sync:
         except (OSError, ValueError):
             return {}
 
-    def _write_state(self, revision: int, sha256: str) -> None:
+    def _write_state(self, revision: int, sha256: str, removed: int | None = None) -> None:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        self._state_path.write_text(
-            json.dumps({"key_hash": self._key_hash, "revision": revision, "sha256": sha256}), encoding="utf-8"
-        )
+        record = {"key_hash": self._key_hash, "revision": revision, "sha256": sha256}
+        if removed is not None:
+            record["removed"] = removed  # this folder was built on work the server removed; the next restore sets it aside
+        self._state_path.write_text(json.dumps(record), encoding="utf-8")
 
     def _local_zip(self) -> tuple[bytes, str]:
         with _storage_quiet():
@@ -167,31 +185,53 @@ class Sync:
         """
         with self._lock:
             self._conflict = False
-            try:
-                code, data, headers = self._request("GET")
-            except _Failure as problem:
-                self._fail(problem.state)
+            self._removed = False
+            marked = self._marked_removed()
+            if marked is None:
                 return "failed"
-            if code == 404 and headers.get("X-Provenance-Removed") is not None:
-                return self._after_removal(int(str(headers.get("X-Provenance-Removed")).strip() or 0))
-            if code == 404:
-                return self._without_remote()
-            if code != 200:
-                self._fail(self._refused(code).state)
-                return "failed"
-            remote = int(str(headers.get("ETag", '"0"')).strip('"') or 0)
-            state = self._read_state()
-            same_owner = state.get("key_hash") == self._key_hash
+            outcome = self._restore_from_server()
+            if marked and outcome == "empty":
+                self.status = SyncStatus("removed", _MESSAGES["removed"], self.status.revision, self.status.saved_at)
+            return outcome
 
-            if self._has_history() and same_owner:
-                _, local_hash = self._local_zip()
-                if state.get("revision") == remote or local_hash != state.get("sha256"):
-                    self._remember(remote, state.get("sha256", ""))
-                    return "kept-local"  # this folder is the latest copy, or has work the server has not seen
-            if self._has_history():
-                self._put_aside("unsynced" if not state else "foreign")
-            self._install(data, remote)
-            return "restored"
+    def _marked_removed(self) -> bool | None:
+        """Set aside a folder that an earlier push found removed but could not move. None when it still cannot be moved."""
+        state = self._read_state()
+        if state.get("removed") is None or state.get("key_hash") != self._key_hash or not self._has_history():
+            return False
+        try:
+            self._put_aside("removed")
+        except OSError:
+            self._fail("busy")
+            return None
+        return True
+
+    def _restore_from_server(self) -> str:
+        try:
+            code, data, headers = self._request("GET")
+        except _Failure as problem:
+            self._fail(problem.state)
+            return "failed"
+        if code == 404 and headers.get("X-Provenance-Removed") is not None:
+            return self._after_removal(_as_revision(headers.get("X-Provenance-Removed")))
+        if code == 404:
+            return self._without_remote()
+        if code != 200:
+            self._fail(self._refused(code).state)
+            return "failed"
+        remote = int(str(headers.get("ETag", '"0"')).strip('"') or 0)
+        state = self._read_state()
+        same_owner = state.get("key_hash") == self._key_hash
+
+        if self._has_history() and same_owner:
+            _, local_hash = self._local_zip()
+            if state.get("revision") == remote or local_hash != state.get("sha256"):
+                self._remember(remote, state.get("sha256", ""))
+                return "kept-local"  # this folder is the latest copy, or has work the server has not seen
+        if self._has_history():
+            self._put_aside("unsynced" if not state else "foreign")
+        self._install(data, remote)
+        return "restored"
 
     def _after_removal(self, mark: int) -> str:
         """The server's copy was removed (revision `mark`): work saved before that is set aside, work begun after it is kept."""
@@ -209,7 +249,14 @@ class Sync:
         return "empty"
 
     def _set_aside_for_removal(self, mark: int) -> None:
-        self._put_aside("removed")
+        """Move the folder aside. If it is in use and cannot be moved, mark it for the next restore instead of raising."""
+        try:
+            self._put_aside("removed")
+        except OSError:
+            self._removed = True
+            self._write_state(mark, "", removed=mark)
+            self.status = SyncStatus("removed", _MESSAGES["removed-in-use"], mark, self.status.saved_at)
+            return
         self._write_state(mark, "")
         self.status = SyncStatus("removed", _MESSAGES["removed"], mark, self.status.saved_at)
 
@@ -244,7 +291,7 @@ class Sync:
     def push(self) -> bool:
         """Send the folder if it changed since the last save. True when something was stored."""
         with self._lock:
-            if not self._has_history() or self._conflict:
+            if not self._has_history() or self._conflict or self._removed:
                 return False
             state = self._read_state()
             try:
@@ -263,7 +310,7 @@ class Sync:
                 code, body, _ = self._request("PUT", data, if_match=0 if known is None else known)
                 if code == 410:
                     # the server's copy was removed after this folder was built: set it aside instead of resending it
-                    mark = int(json.loads(body or b"{}").get("revision", 0))
+                    mark = _revision_in(body)
                     self._set_aside_for_removal(mark)
                     return False
                 if code == 409 and known is None:

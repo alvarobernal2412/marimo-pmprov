@@ -540,3 +540,59 @@ def test_work_started_after_the_removal_is_kept(service, tmp_path):
     assert (folder / "provenance.db").read_bytes() == b"fresh work"
     assert again.push() is True
     assert service.stored[KEY][0] == 3
+
+
+def _unmovable(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr("provenance_widget.sync.shutil.move", refuse)
+
+
+def test_a_removal_met_while_the_folder_is_in_use_is_reported_not_raised(service, tmp_path, monkeypatch):
+    folder = _history(tmp_path / "provenance", b"old work")
+    sync = Sync(service.url, KEY, folder)
+    sync.push()
+    service.remove(KEY)
+    (folder / "provenance.db").write_bytes(b"changed after the removal")
+    _unmovable(monkeypatch)
+
+    assert sync.push() is False
+    assert sync.status.state == "removed"
+    assert sync.status.message == (
+        "Your saved work was removed from the course server. Reload this page to start empty; "
+        "the earlier copy on this computer will be set aside."
+    )
+    assert (folder / "provenance.db").exists()
+    puts = service.puts
+    assert sync.push() is False
+    assert service.puts == puts
+
+
+def test_the_next_restore_sets_the_marked_folder_aside(service, tmp_path, monkeypatch):
+    folder = _history(tmp_path / "provenance", b"old work")
+    sync = Sync(service.url, KEY, folder)
+    sync.push()
+    service.remove(KEY)
+    (folder / "provenance.db").write_bytes(b"changed after the removal")
+    with monkeypatch.context() as patch:
+        _unmovable(patch)
+        sync.push()
+
+    again = Sync(service.url, KEY, folder)
+    assert again.restore() == "empty"
+    assert not (folder / "provenance.db").exists()
+    aside = list(tmp_path.glob("provenance.removed-*"))
+    assert len(aside) == 1 and (aside[0] / "provenance.db").read_bytes() == b"changed after the removal"
+    _history(folder, b"fresh work")
+    assert again.push() is True
+    assert service.stored[KEY][0] == 3
+
+
+def test_a_malformed_removed_header_does_not_raise(service, tmp_path):
+    folder = _history(tmp_path / "provenance", b"old work")
+    service.removed[KEY] = "not-a-number"
+
+    outcome = Sync(service.url, KEY, folder).restore()
+
+    assert outcome in ("empty", "kept-local")
