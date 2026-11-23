@@ -175,7 +175,10 @@ panel = ProvenancePanel(source=PmprovAdapter(rt), mode="analyst", capture_charts
 ```
 
 Tables made with `show_table` (or any table inside one) are covered. Once a chart has been left alone for about a second it becomes a
-step `visualize_chart` of the history (the table, chart type, X, Y, aggregation, sort, color, facet and a picture of the chart). It can
+step `visualize_chart` of the history, with a picture of the chart and its settings: the chart type, and per axis the column,
+aggregation, data type, sort, bin step and maximum bins; the Style tab (title, grid lines, axis labels, width, height, colour);
+faceting and tooltips. Any change to one of them is a new step. While a field such as the bin step or the title is being typed in,
+nothing is recorded: marimo applies the value and redraws the chart when the field is left, and only then is the picture taken. It can
 then be anchored like a table or a map, it is drawn in the PDF, and a reviewer notebook can show the charts up to the replay cursor:
 
 ```python
@@ -186,7 +189,8 @@ show_recorded_charts(adapter, cursor_state)  # the charts recorded up to the ste
 
 A source opts in by having `record_chart(artifact_id, artifact_name, settings, png=None)` (and, to take part in restoring below,
 `builder=None` and `charts_to_restore()`); `PmprovAdapter` has them. The watcher reads the headings and labels of marimo's chart
-builder, so a marimo upgrade that changes it stops charts from being recorded (nothing else breaks): re-check after upgrading marimo.
+builder and marimo's saved state of the chart tab (the Style tab and folded sections are not on the page), so a marimo upgrade that
+changes either stops charts from being recorded, or some of their settings (nothing else breaks): re-check after upgrading marimo.
 
 ### Resuming in another browser
 
