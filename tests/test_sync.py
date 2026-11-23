@@ -20,6 +20,8 @@ class FakeService:
         self.stored = {}  # key -> (revision, bytes)
         self.reject_keys = False
         self.force_status = None
+        self.removed = {}  # key -> revision of the removal mark
+        self.puts = 0
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -44,18 +46,27 @@ class FakeService:
                 if owner.reject_keys or not self._key():
                     return self._send(401)
                 found = owner.stored.get(self._key())
+                if found is None and self._key() in owner.removed:
+                    mark = owner.removed[self._key()]
+                    body = json.dumps({"detail": "removed", "removed": True, "revision": mark}).encode()
+                    return self._send(404, body, {"X-Provenance-Removed": str(mark), "Content-Type": "application/json"})
                 if found is None:
                     return self._send(404)
                 self._send(200, found[1], {"ETag": f'"{found[0]}"'})
 
             def do_PUT(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                owner.puts += 1
                 if owner.force_status:
                     return self._send(owner.force_status)
                 if owner.reject_keys or not self._key():
                     return self._send(401)
-                revision = owner.stored.get(self._key(), (0, b""))[0]
+                mark = owner.removed.get(self._key())
+                revision = owner.stored[self._key()][0] if self._key() in owner.stored else (mark or 0)
                 match = self.headers.get("If-Match", "").strip('"')
+                if mark is not None and self._key() not in owner.stored and not (match.isdigit() and int(match) >= mark):
+                    body = json.dumps({"detail": "this work was removed", "removed": True, "revision": mark, "removed_at": "2026-11-23T10:00:00+00:00"}).encode()
+                    return self._send(410, body, {"Content-Type": "application/json"})
                 if match.isdigit() and int(match) != revision:
                     return self._send(409, json.dumps({"revision": revision}).encode(), {"Content-Type": "application/json"})
                 owner.stored[self._key()] = (revision + 1, body)
@@ -64,6 +75,12 @@ class FakeService:
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def remove(self, key):
+        """The instructor removes a student's work: the counter continues, and the mark is the next revision."""
+        current = self.stored[key][0] if key in self.stored else self.removed.get(key, 0)
+        self.removed[key] = current + 1
+        self.stored.pop(key, None)
 
     def stop(self):
         self.server.shutdown()
@@ -466,3 +483,60 @@ def test_starting_a_saver_stops_the_one_started_earlier_for_the_same_folder(serv
     finally:
         first.stop(flush=False)
         second.stop(flush=False)
+
+
+def _after_a_removal(service, tmp_path):
+    folder = _history(tmp_path / "provenance", b"old work")
+    Sync(service.url, KEY, folder).push()
+    service.remove(KEY)
+    sync = Sync(service.url, KEY, folder)
+    return folder, sync, sync.restore()
+
+
+def test_a_removed_history_is_set_aside_and_the_notebook_starts_empty(service, tmp_path):
+    folder, sync, outcome = _after_a_removal(service, tmp_path)
+
+    assert outcome == "empty"
+    assert not (folder / "provenance.db").exists()
+    aside = list(tmp_path.glob("provenance.removed-*"))
+    assert len(aside) == 1 and (aside[0] / "provenance.db").read_bytes() == b"old work"
+    assert sync.status.state == "removed"
+    assert sync.status.message == (
+        "Your saved work was removed from the course server. This notebook starts empty; "
+        "the earlier copy on this computer was set aside."
+    )
+
+
+def test_after_a_removal_the_first_save_builds_on_the_mark(service, tmp_path):
+    folder, sync, _ = _after_a_removal(service, tmp_path)
+    _history(folder, b"fresh work")
+
+    assert sync.push() is True
+    assert service.stored[KEY][0] == 3
+    assert sync.status.state == "saved"
+
+
+def test_a_stale_save_that_meets_a_removal_is_set_aside_not_retried(service, tmp_path):
+    folder = _history(tmp_path / "provenance", b"old work")
+    sync = Sync(service.url, KEY, folder)
+    sync.push()
+    service.remove(KEY)
+    (folder / "provenance.db").write_bytes(b"changed after the removal")
+    puts = service.puts
+
+    assert sync.push() is False
+    assert service.puts == puts + 1
+    assert sync.status.state == "removed"
+    assert not (folder / "provenance.db").exists()
+    assert len(list(tmp_path.glob("provenance.removed-*"))) == 1
+
+
+def test_work_started_after_the_removal_is_kept(service, tmp_path):
+    folder, _, _ = _after_a_removal(service, tmp_path)
+    _history(folder, b"fresh work")
+
+    again = Sync(service.url, KEY, folder)
+    assert again.restore() == "kept-local"
+    assert (folder / "provenance.db").read_bytes() == b"fresh work"
+    assert again.push() is True
+    assert service.stored[KEY][0] == 3

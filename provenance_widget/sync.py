@@ -26,7 +26,7 @@ from .portable import unpack_provenance, zip_provenance
 
 @dataclass
 class SyncStatus:
-    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | closed | busy | conflict
+    state: str = "idle"  # idle | saved | pending | offline | unauthorized | too-large | closed | busy | conflict | removed
     message: str = "Not saved to the course server yet."
     revision: int = 0
     saved_at: str | None = None
@@ -41,6 +41,8 @@ _MESSAGES = {
     "too-large": "Your work is too large for the course server. Tell your instructor.",
     "conflict": "The course server already has work saved with your key, and it could not be loaded when this notebook opened. "
     "Reload this page to load it. What you did since opening this page is kept in a separate folder on this computer.",
+    "removed": "Your saved work was removed from the course server. This notebook starts empty; "
+    "the earlier copy on this computer was set aside.",
     "closed": "This course is closed, so your work is no longer saved. What you saved before is kept.",
 }
 
@@ -170,6 +172,8 @@ class Sync:
             except _Failure as problem:
                 self._fail(problem.state)
                 return "failed"
+            if code == 404 and headers.get("X-Provenance-Removed") is not None:
+                return self._after_removal(int(str(headers.get("X-Provenance-Removed")).strip() or 0))
             if code == 404:
                 return self._without_remote()
             if code != 200:
@@ -188,6 +192,26 @@ class Sync:
                 self._put_aside("unsynced" if not state else "foreign")
             self._install(data, remote)
             return "restored"
+
+    def _after_removal(self, mark: int) -> str:
+        """The server's copy was removed (revision `mark`): work saved before that is set aside, work begun after it is kept."""
+        state = self._read_state()
+        if self._has_history():
+            built_after = state.get("key_hash") == self._key_hash and state.get("revision", 0) >= mark
+            if built_after:
+                self._write_state(mark, state.get("sha256", ""))
+                self.status = SyncStatus("idle", self.status.message, mark, self.status.saved_at)
+                return "kept-local"
+            self._set_aside_for_removal(mark)
+            return "empty"
+        self._write_state(mark, "")  # nothing here to set aside; the next save builds on the mark
+        self.status = SyncStatus("idle", self.status.message, mark, self.status.saved_at)
+        return "empty"
+
+    def _set_aside_for_removal(self, mark: int) -> None:
+        self._put_aside("removed")
+        self._write_state(mark, "")
+        self.status = SyncStatus("removed", _MESSAGES["removed"], mark, self.status.saved_at)
 
     def _without_remote(self) -> str:
         """The server has nothing for this key."""
@@ -236,7 +260,12 @@ class Sync:
             known = state.get("revision") if owned else None
             note = ""
             try:
-                code, body, _ = self._request("PUT", data, if_match=known or 0)
+                code, body, _ = self._request("PUT", data, if_match=0 if known is None else known)
+                if code == 410:
+                    # the server's copy was removed after this folder was built: set it aside instead of resending it
+                    mark = int(json.loads(body or b"{}").get("revision", 0))
+                    self._set_aside_for_removal(mark)
+                    return False
                 if code == 409 and known is None:
                     self._conflict = True
                     self._fail("conflict")
