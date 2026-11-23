@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.1
+
+### Fixed
+- **Every setting of a Visualize chart is recorded, so an annotation shows the chart as it was.** The bin step, the maximum bins,
+  the Style tab (title, grid lines, axis labels, width, height, colour), faceting and tooltips were not read, so changing them
+  recorded no step and an annotation anchored to the chart kept the earlier picture, also in the exported PDF. A chart is now
+  recorded only after a field being typed in is left, once marimo has redrawn it.
+
 ## 0.14.0
 
 ### Fixed
