@@ -3,10 +3,13 @@
 ## 0.15.0
 
 ### Added
-- **`Sync` starts clean after the instructor removes a student's work.** When the course server reports a removal, a folder built
-  on the removed work is set aside (`<folder>.removed-<time>`, never deleted), the notebook starts empty and `status.state` is
-  `"removed"`. A save that meets a removal is set aside the same way and is not retried. Work begun after the removal is kept and
-  saved on top of it.
+- **`Sync` starts clean after a removal of a student's work, by the instructor or by the student.** When the course server
+  reports a removal, a folder built on the removed work is set aside (`<folder>.removed-<time>`, never deleted), the notebook
+  starts empty and `status.state` is `"removed"`. A save that meets a removal is set aside the same way and is not retried. Work
+  begun after the removal is kept and saved on top of it. A second copy of the notebook (another computer) that was not built on
+  the removal is set aside too when it next opens, even after the work was saved again, so removed work does not come back.
+  Remaining risk: a copy running an older version of this package (0.14.1 or earlier) cannot tell and can still send removed work
+  back with its next save.
 
 ## 0.14.1
 
