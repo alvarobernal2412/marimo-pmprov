@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.0
+
+### Added
+- **`Sync` starts clean after the instructor removes a student's work.** When the course server reports a removal, a folder built
+  on the removed work is set aside (`<folder>.removed-<time>`, never deleted), the notebook starts empty and `status.state` is
+  `"removed"`. A save that meets a removal is set aside the same way and is not retried. Work begun after the removal is kept and
+  saved on top of it.
+
 ## 0.14.1
 
 ### Fixed

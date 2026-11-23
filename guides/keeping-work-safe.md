@@ -19,6 +19,9 @@ sync.status.message   # "Your work is saved on the course server." or what to do
 - Two tabs saving at once end with the latest save, and the status says that a copy from another place was replaced.
 - A folder that belongs to another key is put aside, never uploaded under this one. Work that was never synced is put aside
   too, instead of being overwritten by what the server holds (`<folder>.unsynced-<time>` next to it).
+- When work was removed: if the course server reports that the student's saved work was removed, the folder built on it is moved
+  to `<folder>.removed-<time>` (never deleted), the notebook starts empty and `status.state` is `"removed"`. Work begun after the
+  removal is kept and saved normally.
 - The key is held in memory. It is not written into the provenance folder, so it does not travel in the zip, and it should not be
   written in the notebook either (a fork copies the notebook).
 - The state of the last save is kept next to the folder, in `<folder>.sync.json`.
