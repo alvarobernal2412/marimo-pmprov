@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import shutil
 import threading
 import time
@@ -42,6 +43,8 @@ _MESSAGES = {
     "conflict": "The course server already has work saved with your key, and it could not be loaded when this notebook opened. "
     "Reload this page to load it. What you did since opening this page is kept in a separate folder on this computer.",
     "removed": "Your saved work was removed from the course server. This notebook starts empty; "
+    "the earlier copy on this computer was set aside.",
+    "removed-live": "Your saved work was removed from the course server. Reload this page to start empty; "
     "the earlier copy on this computer was set aside.",
     "removed-in-use": "Your saved work was removed from the course server. Reload this page to start empty; "
     "the earlier copy on this computer will be set aside.",
@@ -222,6 +225,17 @@ class Sync:
         remote = int(str(headers.get("ETag", '"0"')).strip('"') or 0)
         state = self._read_state()
         same_owner = state.get("key_hash") == self._key_hash
+        removed = headers.get("X-Provenance-Removed")
+        if removed is not None and self._has_history():
+            # The work was removed and has been saved again since (by another copy of this notebook). A folder not built on or
+            # after the removal holds the removed work: it is set aside, never sent back, and the server's copy is installed.
+            mark = _as_revision(removed)
+            if not (same_owner and state.get("revision", 0) >= mark):
+                self._set_aside_for_removal(mark)
+                if self._removed:
+                    return "failed"  # in use: marked, and the next restore sets it aside
+                self._install(data, remote)
+                return "restored"
 
         if self._has_history() and same_owner:
             _, local_hash = self._local_zip()
@@ -248,8 +262,9 @@ class Sync:
         self.status = SyncStatus("idle", self.status.message, mark, self.status.saved_at)
         return "empty"
 
-    def _set_aside_for_removal(self, mark: int) -> None:
-        """Move the folder aside. If it is in use and cannot be moved, mark it for the next restore instead of raising."""
+    def _set_aside_for_removal(self, mark: int, live: bool = False) -> None:
+        """Move the folder aside. If it is in use and cannot be moved, mark it for the next restore instead of raising. `live` is
+        for a page that is open on this folder (a save met the removal): it is told to reload."""
         try:
             self._put_aside("removed")
         except OSError:
@@ -258,7 +273,8 @@ class Sync:
             self.status = SyncStatus("removed", _MESSAGES["removed-in-use"], mark, self.status.saved_at)
             return
         self._write_state(mark, "")
-        self.status = SyncStatus("removed", _MESSAGES["removed"], mark, self.status.saved_at)
+        key = "removed-live" if live else "removed"
+        self.status = SyncStatus("removed", _MESSAGES[key], mark, self.status.saved_at)
 
     def _without_remote(self) -> str:
         """The server has nothing for this key."""
@@ -277,7 +293,9 @@ class Sync:
 
     def _put_aside(self, why: str) -> None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        shutil.move(str(self.folder), str(self.folder.with_name(f"{self.folder.name}.{why}-{stamp}")))
+        # a rename in the same directory: it either happens completely or raises, where shutil.move would fall back to copying the
+        # folder and deleting the original (half of it, when a file is locked on Windows)
+        os.replace(self.folder, self.folder.with_name(f"{self.folder.name}.{why}-{stamp}"))
         self._state_path.unlink(missing_ok=True)
 
     def _install(self, data: bytes, revision: int) -> None:
@@ -311,7 +329,7 @@ class Sync:
                 if code == 410:
                     # the server's copy was removed after this folder was built: set it aside instead of resending it
                     mark = _revision_in(body)
-                    self._set_aside_for_removal(mark)
+                    self._set_aside_for_removal(mark, live=True)
                     return False
                 if code == 409 and known is None:
                     self._conflict = True

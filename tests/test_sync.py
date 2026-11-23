@@ -52,7 +52,10 @@ class FakeService:
                     return self._send(404, body, {"X-Provenance-Removed": str(mark), "Content-Type": "application/json"})
                 if found is None:
                     return self._send(404)
-                self._send(200, found[1], {"ETag": f'"{found[0]}"'})
+                headers = {"ETag": f'"{found[0]}"'}
+                if self._key() in owner.removed:
+                    headers["X-Provenance-Removed"] = str(owner.removed[self._key()])  # like the server: still sent after a new save
+                self._send(200, found[1], headers)
 
             def do_PUT(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -527,6 +530,10 @@ def test_a_stale_save_that_meets_a_removal_is_set_aside_not_retried(service, tmp
     assert sync.push() is False
     assert service.puts == puts + 1
     assert sync.status.state == "removed"
+    assert sync.status.message == (
+        "Your saved work was removed from the course server. Reload this page to start empty; "
+        "the earlier copy on this computer was set aside."
+    )
     assert not (folder / "provenance.db").exists()
     assert len(list(tmp_path.glob("provenance.removed-*"))) == 1
 
@@ -546,7 +553,7 @@ def _unmovable(monkeypatch):
     def refuse(*args, **kwargs):
         raise PermissionError("in use")
 
-    monkeypatch.setattr("provenance_widget.sync.shutil.move", refuse)
+    monkeypatch.setattr("provenance_widget.sync.os.replace", refuse)
 
 
 def test_a_removal_met_while_the_folder_is_in_use_is_reported_not_raised(service, tmp_path, monkeypatch):
@@ -596,3 +603,81 @@ def test_a_malformed_removed_header_does_not_raise(service, tmp_path):
     outcome = Sync(service.url, KEY, folder).restore()
 
     assert outcome in ("empty", "kept-local")
+
+
+def test_a_second_copy_with_unsynced_edits_does_not_bring_removed_work_back(service, tmp_path):
+    first = tmp_path / "laptop1" / "provenance"
+    second = tmp_path / "laptop2" / "provenance"
+    _history(first, b"old work")
+    Sync(service.url, KEY, first).push()
+    (first / "provenance.db").write_bytes(b"old work, second save")
+    Sync(service.url, KEY, first).push()  # revision 2
+    copy = Sync(service.url, KEY, second)
+    assert copy.restore() == "restored"  # the other computer holds revision 2 too
+    (second / "provenance.db").write_bytes(b"old work + an unsynced edit")
+    service.remove(KEY)  # the mark is 3
+    one = Sync(service.url, KEY, first)
+    assert one.restore() == "empty"
+    _history(first, b"fresh after the removal")
+    assert one.push() is True  # revision 4
+    puts = service.puts
+
+    again = Sync(service.url, KEY, second)
+    assert again.restore() == "restored"
+
+    assert (second / "provenance.db").read_bytes() == b"fresh after the removal"
+    aside = list((tmp_path / "laptop2").glob("provenance.removed-*"))
+    assert len(aside) == 1 and (aside[0] / "provenance.db").read_bytes() == b"old work + an unsynced edit"
+    assert again.push() is False
+    assert service.puts == puts
+    assert service.stored[KEY][0] == 4
+    assert zipfile.ZipFile(io.BytesIO(service.stored[KEY][1])).read("provenance.db") == b"fresh after the removal"
+
+
+def test_a_folder_that_was_never_synced_is_also_set_aside_when_the_server_has_a_removal_mark(service, tmp_path):
+    first = tmp_path / "laptop1" / "provenance"
+    _history(first, b"old work")
+    Sync(service.url, KEY, first).push()
+    service.remove(KEY)
+    one = Sync(service.url, KEY, first)
+    one.restore()
+    _history(first, b"fresh after the removal")
+    one.push()
+    stray = _history(tmp_path / "laptop2" / "provenance", b"never synced")
+
+    assert Sync(service.url, KEY, stray).restore() == "restored"
+    assert (stray / "provenance.db").read_bytes() == b"fresh after the removal"
+    assert len(list((tmp_path / "laptop2").glob("provenance.removed-*"))) == 1
+
+
+def test_a_folder_built_on_the_removal_keeps_its_own_newer_work(service, tmp_path):
+    folder, sync, _ = _after_a_removal(service, tmp_path)
+    _history(folder, b"fresh work")
+    assert sync.push() is True  # revision 4, built on the mark
+    (folder / "provenance.db").write_bytes(b"fresh work, edited")
+
+    assert Sync(service.url, KEY, folder).restore() == "kept-local"
+    assert (folder / "provenance.db").read_bytes() == b"fresh work, edited"
+
+
+def test_a_second_copy_in_use_is_marked_and_not_sent_when_the_server_has_new_work(service, tmp_path, monkeypatch):
+    first = tmp_path / "laptop1" / "provenance"
+    second = tmp_path / "laptop2" / "provenance"
+    _history(first, b"old work")
+    Sync(service.url, KEY, first).push()
+    assert Sync(service.url, KEY, second).restore() == "restored"
+    (second / "provenance.db").write_bytes(b"unsynced edit")
+    service.remove(KEY)
+    one = Sync(service.url, KEY, first)
+    one.restore()
+    _history(first, b"fresh after the removal")
+    one.push()
+    puts = service.puts
+    _unmovable(monkeypatch)
+
+    again = Sync(service.url, KEY, second)
+    assert again.restore() == "failed"
+    assert again.status.state == "removed"
+    assert (second / "provenance.db").read_bytes() == b"unsynced edit"
+    assert again.push() is False
+    assert service.puts == puts
