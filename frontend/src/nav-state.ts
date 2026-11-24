@@ -11,6 +11,8 @@ export interface TreeNavState {
   _pwForward?: Record<string, string>;
   // annotation composer draft, so a re-render never loses what is being typed
   _pwDraft?: { note: string; tags: string };
+  // an annotation is waiting to be added until the notebook has recorded a dragged figure (see watched-figure.ts)
+  _pwAdding?: boolean;
   // PDF export: the pending request id, or the last error
   _pwExport?: { pending?: string; error?: string };
 }
