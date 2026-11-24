@@ -24,6 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from provenance_widget.builder_state import valid_builder_state
+from provenance_widget.chart_tables import (
+    TABLE_OF_TAB,
+    as_drawn,
+    recorded_chart_tabs,
+    with_recorded_aggregations,
+    without_table,
+)
 from provenance_widget.repeats import DEFAULT_MIN_LENGTH, find_repeated_runs
 from provenance_widget.interfaces import (
     Agent,
@@ -83,6 +90,11 @@ def _picture_of(png: bytes | None) -> bytes | None:
     return bytes(png)
 
 
+def _chart_key(table_name: str, settings: dict) -> str:
+    """One recorded chart: its table and the settings the chart builder showed."""
+    return json.dumps([table_name, settings], sort_keys=True, default=str)
+
+
 def _chart_title(table_name: str, settings: dict) -> str:
     """"Bar chart of case_log: case_LoanGoal by Count of records" for the artifact's name (what an anchor and the report call it)."""
     kind = str(settings.get("chart_type") or "Chart")
@@ -121,6 +133,11 @@ class PmprovAdapter:
         # again; read from the stored history the first time, so a restarted notebook does not repeat what it already holds
         self._chart_lock = threading.Lock()
         self._last_chart: dict[str, dict] | None = None
+        # what the recorded charts left behind, read with _last_chart (see _read_recorded_charts): each table's chart tabs, the
+        # tabs last recorded under each cell id (for a notebook whose cells cannot be asked), and what each recorded chart answered
+        self._chart_tabs: dict[str, list] = {}
+        self._cell_tabs: dict[str, list] = {}
+        self._chart_answers: dict[str, dict] = {}
         self._author = Agent(
             agent_id=tracker._agent.agent_id,
             agent_type=tracker._agent.agent_type.value,
@@ -338,19 +355,31 @@ class PmprovAdapter:
 
         `builder` is marimo's own saved state of the chart tabs of the table's cell (see `builder_state`). It is kept with the step, so
         that `charts_to_restore` can give the tabs back to a browser that has never seen the analysis. A malformed one is ignored.
+        The tabs are kept with the name of their table and with every aggregation that was recorded for them (see `chart_tables`).
 
-        A call with the settings already recorded for that table returns None and records nothing. Otherwise returns
-        {"stateId", "artifactId" (None without a usable picture), "artifactName"}.
+        Returns {"stateId", "artifactId" (None without a usable picture), "artifactName"}. A chart that is not new records nothing:
+        - with `builder`, when the table's tabs are the ones recorded last (the analyst is looking at a chart again: another tab, a
+          restart, a reload), the answer is that of the step that recorded these settings, so the chart can still be anchored. It
+          is recorded again only when that step has no picture and this call brings one.
+        - without `builder`, a call with the settings already recorded for that table returns None.
         """
         settings = dict(settings)
         builder = valid_builder_state(builder)
-        with self._chart_lock:
-            if self._last_chart is None:
-                self._last_chart = self._charts_in_history()
-            if self._last_chart.get(artifact_name) == settings:
-                return None
-            self._last_chart[artifact_name] = settings
         picture = _picture_of(png)
+        tabs = None
+        with self._chart_lock:
+            self._read_recorded_charts()
+            if builder is None:
+                if self._last_chart.get(artifact_name) == settings:
+                    return None
+            else:
+                tabs = with_recorded_aggregations([without_table(t) for t in builder["tabs"]], self._chart_tabs.get(artifact_name))
+                known = self._chart_answers.get(_chart_key(artifact_name, settings))
+                looked_at_again = as_drawn(tabs) == as_drawn(self._chart_tabs.get(artifact_name))
+                if looked_at_again and known is not None and (known.get("artifactId") or picture is None):
+                    return dict(known)
+                builder = {"cellId": builder["cellId"], "tabs": [{**t, TABLE_OF_TAB: artifact_name} for t in tabs]}
+            self._last_chart[artifact_name] = settings
         chart_name = _chart_title(artifact_name, settings)
         self._rt.trace_step(
             func=lambda table, settings, builder=None: picture,  # the picture is not an argument: arguments are fingerprinted and stored
@@ -364,39 +393,64 @@ class PmprovAdapter:
         state_id = self.latest_state_id("visualize_chart")
         # an annotation targets the state that produced an output (see variable_for_artifact), so that is the chart's artifact id
         artifact = state_id if picture is not None else None
-        return {"stateId": state_id, "artifactId": artifact, "artifactName": chart_name}
+        answer = {"stateId": state_id, "artifactId": artifact, "artifactName": chart_name}
+        with self._chart_lock:
+            self._chart_answers[_chart_key(artifact_name, settings)] = dict(answer)
+            if tabs is not None:
+                self._chart_tabs[artifact_name] = tabs
+                self._cell_tabs[builder["cellId"]] = tabs
+        return answer
 
-    def charts_to_restore(self) -> dict[str, list[dict]]:
-        """cell id -> the chart tabs marimo's builder had in that cell, from the latest chart recorded there (oldest first, so later
-        ones win). What the panel hands to the page, which puts them back into a browser that lacks them. Charts recorded without
-        a builder state (older histories) add nothing. Empty on any trouble reading the history."""
+    def charts_to_restore(self, cells: dict | None = None) -> dict[str, list[dict]]:
+        """cell id -> the chart tabs to put back into a browser that lacks them. What the panel hands to the page.
+
+        With `cells` (name of a table -> the id of the cell that draws it now, see `chart_tables.table_cells`), each table's tabs
+        as they were left, under the cell of that table: a notebook that gained or lost cells since still opens every chart on
+        its own table. Without it, the tabs last recorded under each cell id. Charts recorded without a builder state (older
+        histories) add nothing. Empty on any trouble reading the history."""
         try:
-            restore: dict[str, list[dict]] = {}
-            for node in self.get_tree().nodes.values():
+            with self._chart_lock:
+                self._read_recorded_charts()
+                if cells:
+                    return {cells[table]: list(tabs) for table, tabs in self._chart_tabs.items() if table in cells and tabs}
+                return {cell: list(tabs) for cell, tabs in self._cell_tabs.items()}
+        except Exception:
+            return {}
+
+    def _read_recorded_charts(self) -> None:
+        """Read once, from the stored steps (oldest first, so later ones win), what the recorded charts left behind. Call it with
+        the chart lock held. On trouble reading the history nothing is known, and charts are recorded as new."""
+        if self._last_chart is not None:
+            return
+        self._last_chart, self._chart_tabs, self._cell_tabs, self._chart_answers = {}, {}, {}, {}
+        try:
+            self.settle()
+            stored = self._rt.storage.load_graph(self._rt._history.history_id)["steps"]
+            pictured = {s["output_state_id"] for s in stored if str(s.get("raw_line") or "").startswith("chart_image")}
+            charts = []
+            for state_id, node in self.get_tree().nodes.items():
                 if node.operation.name != "visualize_chart":
                     continue
+                table, settings = str(node.params.get("table", "")), dict(node.params.get("settings") or {})
+                self._last_chart[table] = settings
+                self._chart_answers[_chart_key(table, settings)] = {
+                    "stateId": state_id,
+                    "artifactId": state_id if state_id in pictured else None,
+                    "artifactName": _chart_title(table, settings),
+                }
                 try:
                     raw = node.params.get("builder")
                     builder = valid_builder_state(json.loads(raw) if isinstance(raw, str) else raw)
                 except ValueError:
                     continue  # a step whose builder state is not readable adds nothing
                 if builder is not None:
-                    restore[builder["cellId"]] = builder["tabs"]
-            return restore
+                    charts.append((table, builder))
+                    self._cell_tabs[builder["cellId"]] = with_recorded_aggregations(
+                        [without_table(t) for t in builder["tabs"]], self._cell_tabs.get(builder["cellId"])
+                    )
+            self._chart_tabs = recorded_chart_tabs(charts)
         except Exception:
-            return {}
-
-    def _charts_in_history(self) -> dict[str, dict]:
-        """table name -> the settings of the latest chart recorded for it, from the stored steps (oldest first, so later ones win)."""
-        try:
-            nodes = self.get_tree().nodes.values()
-            return {
-                str(n.params.get("table", "")): dict(n.params.get("settings") or {})
-                for n in nodes
-                if n.operation.name == "visualize_chart"
-            }
-        except Exception:
-            return {}
+            pass
 
     def _load_annotations(self, state_id: str) -> list[Annotation]:
         """Translate pmprov's stored annotations/tags for *state_id* into this

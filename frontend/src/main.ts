@@ -9,7 +9,7 @@ import { icon } from "./components/icons";
 import { sendAgainWhenBackOnline } from "./reconnect";
 import { armSidebarResize } from "./sidebar-resize";
 import { armChartCapture } from "./chart-capture";
-import { restoreChartBuilders } from "./chart-restore";
+import { armChartRestore } from "./chart-restore";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -250,9 +250,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): void {
   const mount = el as HTMLElement & { _pwStopCharts?: () => void };
   mount._pwStopCharts?.();
   mount._pwStopCharts = armChartCapture(model, root);
-  // ... and the charts the history recorded are put back into this browser's marimo storage (one reload, only when it lacks them)
-  restoreChartBuilders(model);
-  model.on("change:chart_restore", () => restoreChartBuilders(model)); // a live history is read in a thread and may arrive later
+  // ... and the charts the history recorded are put back into this browser's marimo storage (one reload, only when it lacks them
+  // or has them under the ids of other cells), which is then kept in step with what is recorded
+  const restoring = el as HTMLElement & { _pwStopRestore?: () => void };
+  restoring._pwStopRestore?.();
+  restoring._pwStopRestore = armChartRestore(model, root);
 
   armGutterAffordance(model, (selection) => {
     if (model.get("active_tab") !== "curated" && getVisibleTabs().includes("curated")) {
