@@ -8,6 +8,7 @@ import { requestPdfExport } from "../export";
 import { highlightTargets } from "../highlight";
 import { renderReplayBar } from "./replay-bar";
 import type { TreeNavState } from "../nav-state";
+import { currentSelection, figureNow, whenRecorded, type Selection } from "../watched-figure";
 
 interface AnyModel {
   get(key: string): unknown;
@@ -117,13 +118,42 @@ function renderComposer(model: AnyModel, pickButton?: HTMLElement): HTMLElement 
   commitBtn.className = "pw-commit-btn";
   commitBtn.textContent = "Add";
   commitBtn.title = "Add annotation (Ctrl+Enter)";
+  // What is picked, as it is on the page now: a figure whose nodes were dragged since is drawn again as another artifact.
+  const picked = (): Selection => {
+    const selection = ((model.get("selection") as { artifact?: Selection })?.artifact ?? {}) as Selection;
+    return selection.figure ? currentSelection(selection, figureNow(selection.figure)) : selection;
+  };
+  const showWaiting = (): void => {
+    commitBtn.disabled = true;
+    commitBtn.textContent = "Recording…";
+    commitBtn.title = "The notebook is recording where you dragged the figure; the annotation is added when it has";
+  };
+  // The notebook records a dragged figure a moment after the page shows it (longer when it is busy): an annotation added before
+  // that would be attached to the figure as it was. So adding waits until what is shown is what is recorded. The wait is kept on
+  // the model: the sidebar is drawn again while it lasts (the new step arrives), and the composer drawn then must not add twice.
   const commit = (): void => {
-    const selection = (model.get("selection") as { artifact?: Record<string, unknown> })?.artifact ?? {};
+    if (nav._pwAdding) return;
+    whenRecorded(
+      picked,
+      (artifactId) => !!(model.get("tree") as ProvenanceTreeJson)?.nodes?.[artifactId],
+      () => {
+        nav._pwAdding = false;
+        commitNow();
+      },
+      () => {
+        nav._pwAdding = true;
+        showWaiting();
+      },
+    );
+  };
+  if (nav._pwAdding) showWaiting();
+  const commitNow = (): void => {
+    const selection = picked();
     const newAnnotation: AnnotationJson = {
       annotationId: `ann-${Date.now()}`,
-      title: noteField.value.slice(0, 40) || "Untitled annotation",
-      note: noteField.value,
-      tags: tagField.value
+      title: draft.note.slice(0, 40) || "Untitled annotation",
+      note: draft.note,
+      tags: draft.tags
         .split(/\s+/)
         .filter(Boolean)
         .map((name) => ({ name: name.replace(/^#/, ""), color: "#64748B" })),

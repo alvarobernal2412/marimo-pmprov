@@ -12,6 +12,18 @@ interface PickedSelection {
   granularity: string;
   detail: string | null;
   snapshot?: unknown;
+  figure?: string | null; // the watched figure it was picked in (see watched-figure.ts): it is drawn again when its nodes are dragged
+}
+
+// The id of the watched figure (`data-pw-arrangement`, see arrangement.py) an element is in, also from inside shadow roots.
+function watchedFigure(element: Node | null): string | null {
+  let node: Node | null = element;
+  while (node) {
+    const id = (node as HTMLElement).dataset?.pwArrangement;
+    if (id) return id;
+    node = node.parentNode ?? ((node as ShadowRoot).host as Node | undefined) ?? null;
+  }
+  return null;
 }
 
 // The first element that matches, also inside shadow roots (marimo draws some outputs, such as the contents of tabs, in one).
@@ -113,6 +125,7 @@ export function armPicker(
       granularity,
       detail,
       snapshot: readSnapshot(target),
+      figure: watchedFigure(target),
     });
   }
 
