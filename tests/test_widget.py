@@ -731,3 +731,70 @@ def test_capture_charts_switches_on_marimo_visualize(monkeypatch):
     ProvenancePanel(source=_ChartSource(), capture_charts=True)
     ProvenancePanel(source=_ChartSource())
     assert called == [True]  # only the panel that asked for it
+
+
+# --- 0.16: the charts are restored by the cells that draw their tables now ------------------------------------------------------
+
+
+class _TableSource(_BuilderSource):
+    """A source that keeps the charts by table, as PmprovAdapter does."""
+
+    def __init__(self, by_table=None):
+        super().__init__()
+        self.by_table = by_table or {}
+        self.asked = []
+
+    def charts_to_restore(self, cells=None):
+        self.asked.append(cells)
+        return {cells[table]: tabs for table, tabs in self.by_table.items() if table in cells} if cells else {"as-recorded": []}
+
+
+def test_the_panel_asks_for_the_charts_by_the_cells_of_this_notebook_and_tells_the_page_the_layout(monkeypatch):
+    import provenance_widget.widget as widget_module
+
+    monkeypatch.setattr(widget_module, "table_cells", lambda: {"case_log": "Hbol", "raw_events": "vblA"})
+    source = _TableSource({"case_log": BUILDER["tabs"], "a_table_that_is_gone": BUILDER["tabs"]})
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    assert source.asked == [{"case_log": "Hbol", "raw_events": "vblA"}]
+    assert panel.widget.chart_restore == {"Hbol": BUILDER["tabs"]}
+    assert panel.widget.chart_layout == widget_module.chart_layout({"case_log": "Hbol", "raw_events": "vblA"}) != ""
+    assert panel.widget.chart_restore_ready is True
+
+
+def test_outside_marimo_or_with_an_older_source_the_charts_are_restored_as_they_were_recorded(monkeypatch):
+    import provenance_widget.widget as widget_module
+
+    stored = {"MJUe": BUILDER["tabs"]}
+    panel = ProvenancePanel(source=_BuilderSource(stored), capture_charts=True)  # no cell is known: not in a notebook
+    assert panel.widget.chart_layout == "" and panel.widget.chart_restore == stored and panel.widget.chart_restore_ready is True
+    monkeypatch.setattr(widget_module, "table_cells", lambda: {"case_log": "Hbol"})
+    older = ProvenancePanel(source=_BuilderSource(stored), capture_charts=True)  # its charts_to_restore() takes no cells
+    assert older.widget.chart_restore == stored and older.widget.chart_layout != ""
+
+
+def test_the_page_is_told_that_nothing_was_recorded_and_is_not_told_when_the_history_cannot_be_read(monkeypatch):
+    import provenance_widget.widget as widget_module
+
+    monkeypatch.setattr(widget_module, "table_cells", lambda: {"case_log": "Hbol"})
+    empty = ProvenancePanel(source=_TableSource(), capture_charts=True)
+    assert empty.widget.chart_restore == {} and empty.widget.chart_restore_ready is True
+
+    class Failing(_TableSource):
+        def charts_to_restore(self, cells=None):
+            raise RuntimeError("storage unavailable")
+
+    assert ProvenancePanel(source=Failing(), capture_charts=True).widget.chart_restore_ready is False
+    assert ProvenancePanel(source=_TableSource(), mode="reviewer", capture_charts=True).widget.chart_layout == ""
+
+
+def test_after_a_chart_is_recorded_the_page_is_given_the_charts_again(monkeypatch):
+    import provenance_widget.widget as widget_module
+
+    monkeypatch.setattr(widget_module, "table_cells", lambda: {"case_log": "Hbol"})
+    source = _TableSource()
+    panel = ProvenancePanel(source=source, capture_charts=True)
+    assert panel.widget.chart_restore == {}
+    source.by_table = {"case_log": BUILDER["tabs"]}  # what recording the chart leaves in the source
+    panel.widget.chart_event = {**_chart_event(), "builder": BUILDER}
+    panel.wait_for_persistence()
+    assert panel.widget.chart_restore == {"Hbol": BUILDER["tabs"]}

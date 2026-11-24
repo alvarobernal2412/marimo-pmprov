@@ -4,6 +4,13 @@
 // history recorded each chart. The tabs are recorded with each chart (`readBuilderState`) and handed back through `chart_restore`;
 // `restoreChartBuilders` writes them where marimo reads them and reloads the page once, because marimo reads that storage when the
 // page starts and takes no notice of a later write. Everything here reads the page defensively and never throws.
+//
+// Two more things keep a resumed analysis the one that was left:
+// - marimo saves the tabs under the id of the table's cell, and an id is the position of the cell. `chart_layout` names where the
+//   tables are drawn now; a browser that saved its tabs under another layout has them under the ids of other cells, so they are
+//   replaced by the recorded ones, which the panel gives by the cells of now.
+// - marimo shows an aggregation it has not saved (Y is "Mean") and loads a tab without one as "None". The recorded tabs have it,
+//   and `keepAggregations` writes it into the saved ones while the page is open, so the next start finds it and loads nothing twice.
 
 export interface BuilderTab {
   tabName: string;
@@ -30,6 +37,8 @@ export interface RestoreEnv {
 }
 
 export const marimoChartsKey = (filename: string): string => `marimo:charts:v2:${filename}`;
+/** Where this browser remembers the layout (see `chart_layout`) its saved tabs of a notebook belong to. */
+export const chartLayoutKey = (filename: string): string => `pw-chart-layout:${filename}`;
 
 /** The notebook's file name as marimo's page states it (a hidden element), which is what marimo scopes its storage key by. */
 export function notebookFilename(): string | null {
@@ -134,6 +143,48 @@ export function mergeBuilderStates(existingJson: string | null, restore: Builder
   return { json: JSON.stringify(entries), changed };
 }
 
+function savedEntries(json: string | null): [string, BuilderTab[]][] {
+  try {
+    const parsed = JSON.parse(json ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((e) => Array.isArray(e) && typeof e[0] === "string" && Array.isArray(e[1])) as [string, BuilderTab[]][];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Gives the saved tabs (`entries`, changed in place) the recorded aggregations they lack: a column of a saved tab (same cell, tab
+ * name and chart type, same field) without an `aggregate` gets the recorded one. An aggregation that is saved, also "none", is the
+ * analyst's choice and is never changed. Returns whether it added one.
+ */
+export function fillAggregations(entries: [string, BuilderTab[]][], restore: BuilderTabs): boolean {
+  let added = false;
+  for (const [cellId, tabs] of entries) {
+    const recorded = restore[cellId];
+    if (!Array.isArray(recorded)) continue;
+    for (const tab of tabs) {
+      try {
+        const old = recorded.find((t) => t && t.tabName === tab.tabName && t.chartType === tab.chartType);
+        const general = (tab.config as { general?: Record<string, any> } | null)?.general;
+        const oldGeneral = (old?.config as { general?: Record<string, any> } | null)?.general;
+        if (!general || !oldGeneral) continue;
+        for (const [, key] of COLUMNS) {
+          const column = general[key];
+          const earlier = oldGeneral[key];
+          if (!column || !earlier || !column.field || column.field !== earlier.field) continue;
+          if (column.aggregate !== undefined || !earlier.aggregate) continue;
+          column.aggregate = earlier.aggregate;
+          added = true;
+        }
+      } catch {
+        // a tab of a shape this does not know is left alone
+      }
+    }
+  }
+  return added;
+}
+
 const hash = (text: string): string => {
   let h = 5381;
   for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
@@ -151,21 +202,43 @@ function browserEnv(): RestoreEnv {
 
 /**
  * Put the charts the history recorded (`chart_restore`) back into marimo's storage and reload the page once, so every table opens
- * its Visualize tab as the analyst left it. Does nothing when this browser already has those tabs, which is the normal case after the
- * first time, and never reloads twice for the same recorded charts in one tab, so it cannot loop. Returns whether it reloaded.
+ * its Visualize tab as the analyst left it. Call it when the page starts. Does nothing when this browser already has those tabs,
+ * which is the normal case after the first time, and never reloads twice for the same recorded charts in one tab, so it cannot
+ * loop. Returns whether it reloaded.
+ *
+ * With a `chart_layout`, a browser whose saved tabs belong to another layout (or to none: saved before 0.16) has them replaced by
+ * the recorded ones, once `chart_restore_ready` says these were read: the saved ids name other cells now. Otherwise the recorded
+ * tabs the browser lacks are added, and the saved ones get the recorded aggregations they lack.
  */
 export function restoreChartBuilders(model: AnyModel, env?: RestoreEnv): boolean {
   try {
     if (!model.get("capture_charts")) return false;
-    const restore = (model.get("chart_restore") ?? {}) as BuilderTabs;
-    if (!restore || !Object.keys(restore).length) return false;
+    const restore = ((model.get("chart_restore") ?? {}) || {}) as BuilderTabs;
+    const layout = String(model.get("chart_layout") ?? "");
     const { storage, session, filename, reload } = env ?? browserEnv();
     if (!filename) return false;
     const key = marimoChartsKey(filename);
-    const { json, changed } = mergeBuilderStates(storage.getItem(key), restore);
-    if (!changed) return false;
+    const existing = storage.getItem(key);
+    let json: string | null = null;
+    if (layout) {
+      if (model.get("chart_restore_ready") !== true) return false; // an empty chart_restore may only not have been read yet
+      if (storage.getItem(chartLayoutKey(filename)) !== layout) {
+        storage.setItem(chartLayoutKey(filename), layout);
+        const recorded = Object.entries(restore).filter(([, tabs]) => Array.isArray(tabs) && tabs.length);
+        if (savedEntries(existing).length || recorded.length) json = JSON.stringify(recorded);
+      }
+    }
+    if (json === null) {
+      if (!Object.keys(restore).length) return false;
+      const merged = mergeBuilderStates(existing, restore);
+      const entries = savedEntries(merged.json);
+      const filled = fillAggregations(entries, restore);
+      if (!merged.changed && !filled) return false;
+      json = JSON.stringify(entries);
+    }
+    if (json === existing) return false;
     const guard = `pw-charts-restored:${key}`;
-    const signature = hash(JSON.stringify(restore));
+    const signature = hash(layout + JSON.stringify(restore));
     if (session.getItem(guard) === signature) return false;
     storage.setItem(key, json);
     session.setItem(guard, signature);
@@ -174,4 +247,65 @@ export function restoreChartBuilders(model: AnyModel, env?: RestoreEnv): boolean
   } catch {
     return false;
   }
+}
+
+/**
+ * While the page is open: write the recorded aggregations into the saved tabs that lack them (see `fillAggregations`). marimo does
+ * not read its storage again, so nothing changes on the page; the next start finds the aggregation and has nothing to reload for.
+ * Returns whether it wrote.
+ */
+export function keepAggregations(model: AnyModel, env?: Pick<RestoreEnv, "storage" | "filename">): boolean {
+  try {
+    if (!model.get("capture_charts")) return false;
+    const restore = (model.get("chart_restore") ?? {}) as BuilderTabs;
+    if (!restore || !Object.keys(restore).length) return false;
+    const { storage, filename } = env ?? browserEnv();
+    if (!filename) return false;
+    const key = marimoChartsKey(filename);
+    const entries = savedEntries(storage.getItem(key));
+    if (!fillAggregations(entries, restore)) return false;
+    storage.setItem(key, JSON.stringify(entries));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Restore the recorded charts once the panel has them (`restoreChartBuilders`, which may reload the page), and from then on keep
+ * the saved tabs' aggregations (`keepAggregations`, which never does): after a chart is recorded, every few seconds and as the page
+ * is left. marimo mounts a sidebar widget twice, and a widget is drawn again now and then: the page is restored once, whoever asks.
+ * Returns a function that stops it.
+ */
+export function armChartRestore(model: AnyModel & { on(event: string, callback: () => void): void }, panelRoot: HTMLElement, everyMs = 3000): () => void {
+  const page = window as unknown as { __pwChartsRestored?: boolean };
+  const update = () => {
+    if (!panelRoot.isConnected) return;
+    if (page.__pwChartsRestored) {
+      keepAggregations(model);
+      return;
+    }
+    const has = Object.keys((model.get("chart_restore") ?? {}) as object).length > 0;
+    const layout = String(model.get("chart_layout") ?? "");
+    // a live history is read in a thread: wait for it (a panel before 0.16 has no layout and says nothing until it has charts)
+    if (!(model.get("chart_restore_ready") === true || (!layout && has))) return;
+    page.__pwChartsRestored = true;
+    restoreChartBuilders(model);
+  };
+  update();
+  model.on("change:chart_restore", update);
+  model.on("change:chart_restore_ready", update);
+  const leaving = () => {
+    if (page.__pwChartsRestored) keepAggregations(model);
+  };
+  window.addEventListener("pagehide", leaving);
+  const timer = window.setInterval(() => {
+    if (!panelRoot.isConnected) return stop();
+    if (page.__pwChartsRestored) keepAggregations(model);
+  }, everyMs);
+  const stop = () => {
+    window.clearInterval(timer);
+    window.removeEventListener("pagehide", leaving);
+  };
+  return stop;
 }

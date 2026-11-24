@@ -13,6 +13,7 @@ import anywidget
 import traitlets
 
 from provenance_widget.builder_state import valid_builder_state
+from provenance_widget.chart_tables import chart_layout, table_cells
 from provenance_widget.element_snapshot import SNAPSHOT_IMAGE_MAX_BYTES
 from provenance_widget.interfaces import EmptyProvenanceSource, ProvenanceSource
 from provenance_widget.serialize import tree_to_json
@@ -74,15 +75,26 @@ class ProvenanceWidget(anywidget.AnyWidget):
     # The charts the history recorded, as marimo keeps them in the browser: {cell id: [{"tabName", "chartType", "config"}]}. The page
     # puts them back into a browser that lacks them (marimo saves chart tabs only there), reloading once. Analysts with capture_charts.
     chart_restore = traitlets.Dict({}).tag(sync=True)
+    # Where the tables of the notebook are drawn, as a short name (chart_tables.chart_layout); "" when it is not known. A browser
+    # that saved its chart tabs under another one has them under the ids of other cells: the page replaces them by chart_restore,
+    # which is then by the cells of now. chart_restore_ready says that chart_restore has been read from the history (it is read in
+    # a thread, and an empty one must not be taken for "no charts were recorded").
+    chart_layout = traitlets.Unicode("").tag(sync=True)
+    chart_restore_ready = traitlets.Bool(False).tag(sync=True)
+
+
+def _takes(function, name: str) -> bool:
+    """Whether a source's method accepts the argument `name` (a source written for an earlier version may not)."""
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
 
 
 def _takes_builder(record) -> bool:
     """Whether a source's record_chart accepts marimo's builder state (sources written for 0.12 have no such parameter)."""
-    try:
-        parameters = inspect.signature(record).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(p.name == "builder" or p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
+    return _takes(record, "builder")
 
 
 def _decode_png(encoded) -> bytes | None:
@@ -160,7 +172,10 @@ class ProvenancePanel:
         if capture_charts:
             enable_chart_builder()
         self._handled_charts: set[str] = set()
+        # name of a table -> the cell that draws it in this notebook: asked here, while the cell that makes the panel runs
+        self._chart_cells: dict = table_cells() if capture_charts and mode == "analyst" else {}
         if capture_charts and mode == "analyst":
+            self.widget.chart_layout = chart_layout(self._chart_cells)
             self._hand_charts_to_restore_to_the_page(background=build_in_background)
         self._auto_refresh_stop: threading.Event | None = None
         self._persisted_commit_count = 0
@@ -359,22 +374,37 @@ class ProvenancePanel:
         recorded = record(artifact_id, name, settings, png, **extra)
         if isinstance(recorded, dict):
             self.widget.chart_ack = {"eventId": event_id, **recorded}
+        # the page keeps the browser's saved tabs in step with what is recorded (see chart-restore.ts)
+        restore = self._charts_to_restore()
+        if restore is not None and restore != self.widget.chart_restore:
+            self.widget.chart_restore = restore
+
+    def _charts_to_restore(self) -> dict | None:
+        """What the source says the page should have (None when it cannot say), by the cells of this notebook when the source
+        takes them (a source written before 0.16 has no such parameter)."""
+        fetch = getattr(self._source, "charts_to_restore", None)
+        if not callable(fetch):
+            return None
+        try:
+            restore = fetch(self._chart_cells) if self._chart_cells and _takes(fetch, "cells") else fetch()
+        except Exception:
+            _log.exception("could not read the recorded charts to restore")
+            return None
+        return restore if isinstance(restore, dict) else None
 
     def _hand_charts_to_restore_to_the_page(self, background: bool) -> None:
         """Give the page the charts the history recorded, so it can put them back into a browser that lacks them. Read off the
         history in a thread when that history is a live one, whose first read can take a while and must not hold up the notebook."""
-        fetch = getattr(self._source, "charts_to_restore", None)
-        if not callable(fetch):
+        if not callable(getattr(self._source, "charts_to_restore", None)):
             return
 
         def hand_over() -> None:
-            try:
-                restore = fetch()
-            except Exception:
-                _log.exception("could not read the recorded charts to restore")
+            restore = self._charts_to_restore()
+            if restore is None:
                 return
-            if isinstance(restore, dict) and restore:
+            if restore:
                 self.widget.chart_restore = restore
+            self.widget.chart_restore_ready = True
 
         if background:
             threading.Thread(target=hand_over, name="pw-charts-restore", daemon=True).start()
