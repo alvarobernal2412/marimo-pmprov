@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.16.0
+
+### Fixed
+- **A chart built in Visualize comes back on its own table.** marimo keeps the chart tabs of a table in the browser under the id
+  of the table's cell, and an id is the position of the cell: a notebook that gained or lost a cell opened the recorded charts on
+  other tables. The recorded tabs are now kept by the name of their table (`artifact_name`), `ProvenancePanel` finds the cell that
+  draws each table in the running notebook (`chart_tables.table_cells`) and hands the page the charts by those cells, and a
+  browser that saved its tabs under another layout of the notebook has them replaced by the recorded ones (the page is loaded
+  again once). Histories recorded before are read as they are: tabs that tables shared (several tables drawn by one cell) go to
+  the table they were last changed on.
+- **A chart that is only looked at again is not recorded again.** Switching between chart tabs, restarting the notebook or
+  reloading the page recorded a new step each time, because the settings on show differed from the last recorded ones. A chart
+  whose table has the tabs that were recorded last is now answered with the step that recorded it (it can still be anchored);
+  only a real change is a step. The defaults marimo writes into a tab it shows again (sort "ascending", aggregation "none") are
+  not a change.
+- **The aggregation marimo shows but does not save is kept for every tab.** It was filled in for the tab on show only, so a
+  chart recorded later lost the other tabs' "Mean", and a restored chart plotted every value. The recorded tabs now keep it, and
+  the page writes it into the browser's saved tabs while it is open, so a restart in the same browser shows the chart as it was
+  left without loading the page twice.
+
+### Added
+- `provenance_widget.arrangement`: `NodeArrangement` (an anywidget that reports where the nodes of a Plotly Sankey figure were
+  dragged to), `watched`, `reported` and `arranged`. Dragging a node happens in the browser only, so nothing was recorded and an
+  annotation written after it showed the figure as drawn ("Same as Figure n" in the report). A notebook records the reported
+  positions as a step and draws the figure with them. See the module's docstring.
+  Until the notebook has drawn a dragged figure again (it may be busy), the page shows what is not recorded yet: **Add** waits
+  for it ("Recording…"), and a selection picked in the figure before the drag follows the figure, so the annotation is
+  attached to what is on the page, with its picture.
+  `watched(..., pictured=False)` is for a notebook that makes no picture of the figure for the page (drawing a Plotly figure
+  takes seconds, after every drag): the panel then does not wait for one, and the report draws the figure from the step.
+- `provenance_widget.visualize.charts_of_this_layout()`: for a notebook that offers Visualize without a panel, an element that
+  makes a browser forget the chart tabs it saved for another layout of the notebook.
+- `PmprovAdapter.charts_to_restore(cells=None)`; `ProvenanceWidget.chart_layout` and `chart_restore_ready`;
+  `provenance_widget.chart_tables`.
+
+### Notes
+- Draw each table in a cell of its own, and call `show_table(..., artifact_name="<name>")` in the cell that shows it: marimo
+  keeps the charts per cell, so tables that one cell draws share their charts, and the table's cell is found by that name.
+- `table_cells` reads a private part of marimo (the cells of the running notebook). When it cannot, the charts are restored
+  under the cell ids they were recorded with, as before.
+- `record_chart(..., builder=...)` now returns the recorded step's answer for a chart that is looked at again, where it returned
+  None; without `builder` it returns None as before.
+
 ## 0.15.0
 
 ### Added
