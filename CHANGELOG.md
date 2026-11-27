@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.17.0
+
+### Added
+- **A trace of a process map can be anchored where it ends.** A Linear Continuous Process Mapper map that stores its traces (the
+  sequences of activities its cases follow, in the `meta` of its Sankey trace) offers them to the picker. The part of a node that
+  no link leaves from holds the cases that end there; with Anchor armed, thin lines cut it into one segment per stored trace that
+  ends at the node, most frequent at the top, sized by their cases but at least 6 px in a part at least 8 px high (when not all
+  fit, the most frequent ones get a segment). The pointer over a segment picks that trace; anywhere
+  else a node or link is picked as before, and holding Alt picks the node also over a segment. A trace is recorded by its name
+  (`trace A → K → L → Z`). Replay marks all its links and nodes, and the PDF report draws the map with the trace in colour
+  (`Marked: trace A → K → L → Z, 2 cases`). A trace the map does not store (a map stores only its most frequent traces), or one
+  whose elements cannot be told on the page, marks the whole map, never another trace.
+- While Anchor is armed, a map shows what a click would pick: it is marked as a replay would mark it, with a label by the
+  pointer (`trace A → K → L → Z · 2 cases`, `node K`, `link ...`).
+- Stepping through a recorded analysis in the player points at what the step's annotations are about (all of them together),
+  not only at the tables and maps the step drew. A step without annotations is pointed at as before.
+
+### Changed
+- A pinned node, link or trace of a map no longer blinks and is not outlined. It keeps its colour, and the
+  rest of the map is dimmed, until the reviewer clicks, presses Escape or replays another annotation. A pinned cell or column
+  keeps a steady amber outline and fill. A whole table or map still gets the short pulse.
+- A long trace name is shown by its first three and last two steps and the number of steps
+  (`A → B → C → … (11 steps) … → J → K`) in the picker's label, the Target row, the anchor chip and the report; the whole name is
+  kept as recorded and shown on hover.
+
+### Fixed
+- In the report's map, links that are not marked were drawn with a thin black outline, and nodes coloured by name (`white`,
+  `lightgrey`, `dimgrey`, `black`) all came out grey. Plotly draws link and node outlines with one colour for all, so the marked
+  part now stands out by its full colour only, and named colours keep their colour.
+
 ## 0.16.0
 
 ### Fixed
