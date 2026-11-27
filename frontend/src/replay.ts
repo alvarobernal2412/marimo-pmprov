@@ -1,6 +1,7 @@
-import type { ProvenanceNodeJson, ProvenanceTreeJson } from "./types";
+import type { ArtifactRefJson, ProvenanceNodeJson, ProvenanceTreeJson } from "./types";
 import type { TreeNavState } from "./nav-state";
-import { highlightProducedBy } from "./highlight";
+import { collectAnnotations } from "./annotations";
+import { highlightProducedBy, highlightTargets } from "./highlight";
 import { startReplayStatus } from "./replay-status";
 
 interface AnyModel {
@@ -66,6 +67,11 @@ export function nextChoices(model: AnyModel, tree: ProvenanceTreeJson, stateId: 
   return kids.sort((a, b) => (a.stateId === remembered ? -1 : b.stateId === remembered ? 1 : 0));
 }
 
+// What the annotations of a state are about: the refs of all of them, in order. Stepping onto the state points at these.
+export function annotationRefsOf(tree: ProvenanceTreeJson, stateId: string): ArtifactRefJson[] {
+  return (tree.nodes[stateId]?.annotations ?? []).flatMap((annotation) => annotation.artifacts ?? []);
+}
+
 export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: string, forget = false, highlight = true): void {
   const node = tree.nodes[stateId];
   if (!node) return;
@@ -81,7 +87,13 @@ export function moveCursor(model: AnyModel, tree: ProvenanceTreeJson, stateId: s
   model.set("replay", { stateId, params: node.params, isLatest: stateId === latestStateId(tree) });
   model.save_changes();
   if (model.get("outputs_follow_cursor")) startReplayStatus(model, stateId); // says that the notebook is catching up
-  if (highlight && model.get("outputs_follow_cursor")) highlightProducedBy(stateId); // only a notebook that redraws per step has them
+  // only a notebook that redraws per step shows what the step reached; a step with annotations points at what they are about
+  if (highlight && model.get("outputs_follow_cursor")) {
+    collectAnnotations(model, tree); // the annotations written in this session are on their states too
+    const refs = annotationRefsOf(tree, stateId).filter((ref) => ref.artifactName); // a ref without a name cannot be found
+    if (refs.length > 0) highlightTargets(refs);
+    else highlightProducedBy(stateId);
+  }
 }
 
 // Go back to before the first step.
