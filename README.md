@@ -165,6 +165,25 @@ bar_chart
 See `examples/demo_notebook.py` for all five wired up against the same
 dataset.
 
+#### Anchoring part of a process map
+
+On a Plotly Sankey (such as a Linear Continuous Process Mapper map shown with
+`show_chart`), Anchor pins a single node (recorded by its label) or link
+(recorded as `source -> target (label)`). A map that stores its traces in the
+`meta` of its Sankey trace (`{"lcm": {"traces": [...]}}`) also offers whole
+traces where they end. The part of a node that no link leaves from holds the
+cases that end there; while Anchor is armed, thin lines cut it into one segment
+per stored trace that ends at that node (most frequent at the top, sized by
+their cases but at least 6 px, in a part at least 8 px high; when not all fit,
+the most frequent ones get a segment). The pointer over a segment picks that
+trace (`trace A → K → L → Z`); anywhere else on a node picks the node, and Alt
+picks the node also over a segment. The map shows what a click would pick, with
+a label by the pointer. On Replay, and while stepping
+through the recorded analysis, the pinned node, link or trace keeps its colour
+and the rest of the map is faded until you click or press Escape; the PDF report
+draws it in colour with the rest faded. A trace the map does not store, or one
+that cannot be told on the page, marks the whole map instead.
+
 ## Charts built in marimo's Visualize tab
 
 marimo draws the chart builder behind a table's **Visualize** button in the browser and keeps it there, and it offers the button only
