@@ -6,6 +6,7 @@ import { cursorStateId, latestStateId, moveCursor, pathTo } from "../replay";
 import { icon } from "../components/icons";
 import { requestPdfExport } from "../export";
 import { highlightTargets } from "../highlight";
+import { shownDetail } from "../traces";
 import { renderReplayBar } from "./replay-bar";
 import type { TreeNavState } from "../nav-state";
 import { currentSelection, figureNow, whenRecorded, type Selection } from "../watched-figure";
@@ -51,9 +52,10 @@ function renderTargetSelector(model: AnyModel): HTMLElement {
   const granularityLabel = GRANULARITY_LABEL[granularity] ?? granularity;
 
   value.textContent = detail
-    ? `${artifactName} · ${granularityLabel}: ${detail}`
+    ? `${artifactName} · ${granularityLabel}: ${shownDetail(granularity, detail)}`
     : `${artifactName} · ${granularityLabel}`;
-  value.title = `artifact id: ${artifactId}`;
+  // the whole name of a trace shown shortened
+  value.title = granularity === "trace" && detail ? `${detail}\nartifact id: ${artifactId}` : `artifact id: ${artifactId}`;
 
   return target;
 }
