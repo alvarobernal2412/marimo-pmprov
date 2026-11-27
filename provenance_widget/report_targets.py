@@ -58,10 +58,49 @@ def _shorten(label: str) -> str:
     return f"a state of {len(names)} activities"
 
 
-def describe(granularity: str | None, detail: str | None) -> str | None:
-    """The pin in words, or None when it is not a node or a link."""
+def _stored_traces(trace: Any) -> list[dict]:
+    """The traces a Linear Continuous Process Mapper figure carries in the `meta` of its Sankey trace."""
+    meta = getattr(trace, "meta", None)
+    lcm = meta.get("lcm") if isinstance(meta, dict) else None
+    traces = lcm.get("traces") if isinstance(lcm, dict) else None
+    return [t for t in traces or () if isinstance(t, dict)]
+
+
+def _find_trace(trace: Any, name: str) -> dict | None:
+    """The one stored trace with this name, or None (a truncated map does not store every trace)."""
+    found = [t for t in _stored_traces(trace) if t.get("name") == name]
+    return found[0] if len(found) == 1 else None
+
+
+_SHOWN_WHOLE = 6
+
+
+def _short_trace(name: str) -> str:
+    """A trace's name for reading: whole up to six steps, else its first three and last two with the number of steps.
+
+    The same shortening as the panel (`shortTraceName` in traces.ts); the recorded name stays whole for matching.
+    """
+    steps = name.split(" → ")
+    if len(steps) <= _SHOWN_WHOLE:
+        return name
+    return f"{' → '.join(steps[:3])} → … ({len(steps)} steps) … → {' → '.join(steps[-2:])}"
+
+
+def describe(granularity: str | None, detail: str | None, figure: Any = None) -> str | None:
+    """The pin in words, or None when it is not a node, a link or a trace.
+
+    The figure is optional and only gives the number of cases of a trace.
+    """
     if not detail:
         return None
+    if granularity == "trace":
+        text = f"trace {_short_trace(detail)}"
+        sankey = _sankey(figure) if figure is not None else None
+        stored = _find_trace(sankey, detail) if sankey is not None else None
+        cases = stored.get("cases") if stored else None
+        if isinstance(cases, int):
+            text += f", {cases:,} case" + ("" if cases == 1 else "s")
+        return text
     if granularity == "node":
         return f"node {_shorten(detail)}"
     if granularity == "link":
@@ -79,9 +118,35 @@ def describe(granularity: str | None, detail: str | None) -> str | None:
     return None
 
 
+# CSS names of the colours a map can use for its nodes (the Linear Continuous Process Mapper colours them white, lightgrey,
+# dimgrey and black), as red, green, blue.
+_NAMED = {
+    "white": (255, 255, 255),
+    "black": (0, 0, 0),
+    "lightgrey": (211, 211, 211),
+    "lightgray": (211, 211, 211),
+    "dimgrey": (105, 105, 105),
+    "dimgray": (105, 105, 105),
+    "grey": (128, 128, 128),
+    "gray": (128, 128, 128),
+    "darkgrey": (169, 169, 169),
+    "darkgray": (169, 169, 169),
+    "silver": (192, 192, 192),
+    "gainsboro": (220, 220, 220),
+    "whitesmoke": (245, 245, 245),
+}
+
+
 def _alpha(color: Any, alpha: float) -> str:
     """The colour with another opacity; anything not understood becomes a neutral grey."""
     text = str(color or "").strip()
+    named = _NAMED.get(text.lower())
+    if named:
+        return f"rgba({named[0]}, {named[1]}, {named[2]}, {alpha})"
+    match = re.fullmatch(r"#([0-9a-fA-F]{3})", text)
+    if match:
+        red, green, blue = (int(digit * 2, 16) for digit in match.group(1))
+        return f"rgba({red}, {green}, {blue}, {alpha})"
     match = re.fullmatch(r"#([0-9a-fA-F]{6})", text)
     if match:
         value = match.group(1)
@@ -131,7 +196,7 @@ def mark_sankey(figure: Any, granularity: str | None, detail: str | None) -> tup
     The pin has to name exactly one node or link of the map. A figure that is not a Sankey, a pin of another kind, or a pin
     that cannot be found leaves the figure as it is, so the report never marks the wrong element.
     """
-    if granularity not in ("node", "link") or not detail:
+    if granularity not in ("node", "link", "trace") or not detail:
         return figure, False
     try:
         import plotly.graph_objects as go
@@ -139,33 +204,44 @@ def mark_sankey(figure: Any, granularity: str | None, detail: str | None) -> tup
         trace = _sankey(figure)
         if trace is None:
             return figure, False
-        index = _find(trace, granularity, detail)
-        if index is None:
-            return figure, False
+        if granularity == "trace":
+            stored = _find_trace(trace, detail)
+            if stored is None:
+                return figure, False
+            index = None
+        else:
+            index = _find(trace, granularity, detail)
+            if index is None:
+                return figure, False
         marked = go.Figure(figure)
         marked_trace = _sankey(marked)
         node_count = len(marked_trace.node.label or ())
         link_count = len(marked_trace.link.source or ())
         node_colors = [_alpha(c, FADED_ALPHA) for c in _per_mark(marked_trace.node.color, node_count)]
         link_colors = [_alpha(c, FADED_ALPHA) for c in _per_mark(marked_trace.link.color, link_count)]
-        node_lines = ["rgba(0, 0, 0, 0)"] * node_count
-        link_lines = ["rgba(0, 0, 0, 0)"] * link_count
-        node_widths, link_widths = [0] * node_count, [0] * link_count
-        if granularity == "node":
+        if granularity == "trace":
+            own_nodes, own_links = _per_mark(trace.node.color, node_count), _per_mark(trace.link.color, link_count)
+            for i in stored.get("nodes") or ():
+                if 0 <= i < node_count:
+                    node_colors[i] = _alpha(own_nodes[i], 1)
+            for i in stored.get("links") or ():
+                if 0 <= i < link_count:
+                    link_colors[i] = _alpha(own_links[i], 1)
+        elif granularity == "node":
             node_colors[index] = _alpha(_per_mark(trace.node.color, node_count)[index], 1)
-            node_lines[index], node_widths[index] = MARK_EDGE, 4
         else:
             link_colors[index] = MARK_COLOR
-            link_lines[index], link_widths[index] = MARK_EDGE, 3
         marked_trace.node.color = node_colors
-        marked_trace.node.line = {"color": node_lines, "width": node_widths}
         marked_trace.link.color = link_colors
-        marked_trace.link.line = {"color": link_lines, "width": link_widths}
+        # Plotly 7 draws the outline of every link with one colour and width: lists of them are drawn as a thin black line around
+        # each link (and lists for the nodes are ignored the same way). So no link gets an outline, the nodes keep the map's own,
+        # and what is marked stands out by its full colour against the faded rest.
+        marked_trace.link.line = {"color": "rgba(0, 0, 0, 0)", "width": 0}
         # A picture has no tooltip, so the number the reader would hover for is written on the figure.
         top = max((marked.layout.margin.t or 0), 60)
         marked.update_layout(margin={"t": top})
         marked.add_annotation(
-            text=f"<b>Marked:</b> {describe(granularity, detail)}",
+            text=f"<b>Marked:</b> {describe(granularity, detail, figure)}",
             xref="paper", yref="paper", x=0, y=1, yshift=14, xanchor="left", yanchor="bottom", showarrow=False,
             font={"size": 16, "color": MARK_EDGE},
         )
