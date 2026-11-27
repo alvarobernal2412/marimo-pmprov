@@ -5,14 +5,18 @@
 // elements) and returns a refined { granularity, detail } if it recognizes
 // something in that path, or null to let the next resolver (or the
 // artifact's own baked-in granularity/detail) have a turn.
+import { nodeIndexOf, plotOf, segmentsAt, traceAtPoint, type MapTrace, type NodeLayout } from "./traces";
+
 export interface PickDetail {
   granularity: string;
   detail: string | null;
 }
 
+// `event` is the pointer event of the pick, when there is one: where the pointer is on an element, and the keys held, can change
+// what is picked (see the Sankey resolver below).
 export interface DetailResolver {
   name: string;
-  resolve(path: EventTarget[], clickTarget: HTMLElement): PickDetail | null;
+  resolve(path: EventTarget[], clickTarget: HTMLElement, event?: MouseEvent): PickDetail | null;
 }
 
 const resolvers: DetailResolver[] = [];
@@ -21,9 +25,9 @@ export function registerDetailResolver(resolver: DetailResolver): void {
   resolvers.push(resolver);
 }
 
-export function resolveDetail(path: EventTarget[], clickTarget: HTMLElement): PickDetail | null {
+export function resolveDetail(path: EventTarget[], clickTarget: HTMLElement, event?: MouseEvent): PickDetail | null {
   for (const resolver of resolvers) {
-    const result = resolver.resolve(path, clickTarget);
+    const result = resolver.resolve(path, clickTarget, event);
     if (result) return result;
   }
   return null;
@@ -128,9 +132,11 @@ registerDetailResolver({
 
 // Plotly Sankey (lcmaps): nodes and links are SVG elements carrying d3 data. A node is named by its label, a link by
 // "source -> target (link label)", so the detail survives a redraw (indexes do not).
+// A map that stores its traces (see traces.ts) also offers them where they end: the pointer over a trace's segment of the node
+// where it ends picks the trace. Anywhere else on a node picks the node, and holding Alt picks the node itself everywhere.
 interface SankeyDatum {
   index?: number;
-  node?: { label?: string };
+  node?: { label?: string; pointNumber?: number } & NodeLayout;
   link?: { label?: string; source?: { index?: number; node?: { label?: string } }; target?: { index?: number; node?: { label?: string } } };
 }
 
@@ -140,14 +146,31 @@ export function sankeyLinkDetail(d: SankeyDatum, labels: (i: number) => string):
   return `${labels(l.source.index)} -> ${labels(l.target.index)} (${l.label ?? ""})`;
 }
 
+// The trace whose end segment is under the pointer on a node, or null. The pointer's height on the screen is turned into the map's
+// pixels by the node's box (its top is the node's y0).
+export function sankeyTraceAt(node: Element, datum: SankeyDatum, event: MouseEvent): MapTrace | null {
+  const index = nodeIndexOf(datum);
+  const layout = datum.node;
+  if (index === null || !layout || typeof layout.y0 !== "number" || typeof layout.y1 !== "number") return null;
+  const plot = plotOf(node);
+  const segments = plot ? segmentsAt(plot, index, layout) : [];
+  if (segments.length === 0) return null;
+  const box = (node.querySelector?.("rect") ?? node).getBoundingClientRect();
+  if (!(box.height > 0)) return null;
+  const y = layout.y0 + ((event.clientY - box.top) * (layout.y1 - layout.y0)) / box.height;
+  return traceAtPoint(segments, y);
+}
+
 registerDetailResolver({
   name: "plotly-sankey",
-  resolve(path) {
+  resolve(path, _clickTarget, event) {
     for (const node of path) {
       if (!(node instanceof Element)) continue;
       const datum = (node as unknown as { __data__?: SankeyDatum }).__data__;
       if (!datum) continue;
       if (node.classList.contains("sankey-node") && datum.node?.label !== undefined) {
+        const trace = event && !event.altKey ? sankeyTraceAt(node, datum, event) : null;
+        if (trace) return { granularity: "trace", detail: trace.name };
         return { granularity: "node", detail: datum.node.label };
       }
       if (node.classList.contains("sankey-link")) {

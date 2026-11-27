@@ -2,6 +2,7 @@
 // were recorded when a pick was made, find the element that was pinned. Returns null when it cannot be found with
 // confidence, so the caller falls back to marking the whole artifact instead of pointing at the wrong thing.
 import { cellText, headerName, parseCellDetail, sankeyLinkDetail } from "./resolvers";
+import { findTrace, traceElements } from "./traces";
 
 export type Located = HTMLElement | SVGElement;
 
@@ -71,7 +72,21 @@ export function locateDetail(root: HTMLElement, granularity: string, detail: str
     case "node":
     case "link":
       return locateSankey(all, granularity, detail);
+    case "trace":
+      return locateAll(root, granularity, detail)[0] ?? null; // its first link, to scroll to
     default:
       return null;
   }
+}
+
+// Everything that was pinned: every link and node of a trace, the one element of any other kind. Empty when it cannot be found
+// with confidence (a trace the map does not store, or whose elements cannot be matched to the figure), so that the caller marks
+// the whole artifact.
+export function locateAll(root: HTMLElement, granularity: string, detail: string): Located[] {
+  if (granularity === "trace") {
+    const trace = findTrace(root, detail);
+    return trace ? traceElements(root, trace) : [];
+  }
+  const one = locateDetail(root, granularity, detail);
+  return one ? [one] : [];
 }
